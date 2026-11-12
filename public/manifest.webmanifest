@@ -1,0 +1,13 @@
+{
+  "name": "外構かんたんプラン",
+  "short_name": "外構プラン",
+  "description": "外構工事の現地調査・平面図・3Dパース・見積もりをかんたんに作成",
+  "start_url": ".",
+  "display": "standalone",
+  "background_color": "#eef1f3",
+  "theme_color": "#16324a",
+  "lang": "ja",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}
