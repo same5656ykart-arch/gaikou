@@ -51,6 +51,9 @@ npm run preview    # ビルド結果の確認
 
 React + TypeScript + Vite、3D は three.js です。
 
+`VITE_DEMO=1 npm run build` でビルドすると、ホームに「お試し用のページです」という案内が出ます
+（印刷やファイル保存ができない埋め込み環境で見せるとき用）。
+
 ### 公開のしかた
 
 `npm run build` でできる `dist/` フォルダは静的ファイルだけなので、GitHub Pages・Netlify・Vercel・

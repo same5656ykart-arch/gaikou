@@ -69,6 +69,15 @@ export function Home() {
       </header>
 
       <main className="page">
+        {import.meta.env.VITE_DEMO && (
+          <div className="alert alert-info">
+            <Icon name="info" size={18} />
+            <div>
+              <p className="alert-title">お試し用のページです</p>
+              <p className="alert-body">操作はすべて試せますが、このページでは印刷・PDF保存と、画像・バックアップのファイル保存は動きません。自社のサイトなどに公開したアプリでは使えます。</p>
+            </div>
+          </div>
+        )}
         <section className="flow" aria-label="このアプリでできること">
           {FLOW.map((f, i) => (
             <div key={f.title} className="flow-step">
