@@ -15,11 +15,13 @@ export interface Variant {
   size?: [number, number];
   /** 門扉などの幅(m) */
   width?: number;
+  /** 見積もりに入れない仕様（既存のものを「そのまま残す」など） */
+  skip?: boolean;
 }
 
 export type QtyMode = 'area' | 'length' | 'wallArea' | 'count' | 'none';
 
-export type PaletteGroup = 'base' | 'floor' | 'boundary' | 'structure' | 'green' | 'equip';
+export type PaletteGroup = 'base' | 'floor' | 'boundary' | 'structure' | 'green' | 'equip' | 'existing';
 
 export interface CatalogItem {
   key: string;
@@ -56,6 +58,7 @@ export const PALETTE_GROUPS: { key: PaletteGroup; name: string }[] = [
   { key: 'green', name: '植栽・庭' },
   { key: 'equip', name: '設備' },
   { key: 'base', name: '建物・車' },
+  { key: 'existing', name: 'いまあるもの（既存）' },
 ];
 
 export const WORKS = [
@@ -530,6 +533,131 @@ export const CATALOG: CatalogItem[] = [
     stroke: '#a87412',
     z: 4,
   },
+
+  // ---- いまあるもの（既存図に描くもの） ----
+  // 「そのまま残す」なら費用なし、「解体・処分する」を選ぶと撤去費が見積もりに入る。
+  {
+    key: 'exBlock',
+    name: '既存ブロック塀',
+    group: 'existing',
+    work: '解体・撤去工事',
+    shape: 'line',
+    unit: 'm²',
+    qty: 'wallArea',
+    variants: [
+      { key: 'keep', name: 'そのまま残す', price: 0, skip: true },
+      { key: 'remove', name: '解体・処分する', price: 7200 },
+    ],
+    length: 4,
+    includes: 'ブロックと基礎の解体・積み込み・処分。長さ×高さの面積で計算',
+    fill: '#a9adb2',
+    stroke: '#7b8087',
+    z: 3,
+  },
+  {
+    key: 'exFence',
+    name: '既存フェンス',
+    group: 'existing',
+    work: '解体・撤去工事',
+    shape: 'line',
+    unit: 'm',
+    qty: 'length',
+    variants: [
+      { key: 'keep', name: 'そのまま残す', price: 0, skip: true },
+      { key: 'remove', name: '撤去・処分する', price: 2600 },
+    ],
+    length: 4,
+    includes: '本体と柱の撤去・処分。下のブロックは段数に応じて別計上',
+    fill: '#8a949d',
+    stroke: '#6c7680',
+    z: 3,
+  },
+  {
+    key: 'exConcrete',
+    name: '既存コンクリート',
+    group: 'existing',
+    work: '解体・撤去工事',
+    shape: 'rect',
+    unit: 'm²',
+    qty: 'area',
+    variants: [
+      { key: 'keep', name: 'そのまま残す', price: 0, skip: true },
+      { key: 'remove', name: 'はつり・処分する', price: 5600 },
+    ],
+    size: [3, 3],
+    includes: '厚さ10cm程度のコンクリート・アスファルトのはつり・積み込み・処分',
+    fill: '#d3d6d8',
+    stroke: '#8f969c',
+    z: 0,
+  },
+  {
+    key: 'exTree',
+    name: '既存の木',
+    group: 'existing',
+    work: '解体・撤去工事',
+    shape: 'point',
+    unit: '本',
+    qty: 'count',
+    variants: [
+      { key: 'keep', name: 'そのまま残す', price: 0, skip: true },
+      { key: 'remove', name: '伐採・抜根する', price: 22500 },
+    ],
+    includes: '伐採・抜根・処分（中木程度）',
+    fill: '#a9bfa6',
+    stroke: '#5f7f61',
+    z: 4,
+  },
+  {
+    key: 'exShed',
+    name: '既存の物置',
+    group: 'existing',
+    work: '解体・撤去工事',
+    shape: 'rect',
+    unit: '台',
+    qty: 'count',
+    variants: [
+      { key: 'keep', name: 'そのまま残す', price: 0, skip: true },
+      { key: 'remove', name: '解体・処分する', price: 31000 },
+    ],
+    size: [1.8, 0.9],
+    includes: '解体・積み込み・処分',
+    fill: '#c9ced3',
+    stroke: '#7d8791',
+    pattern: 'shed',
+    z: 2,
+  },
+  {
+    key: 'masu',
+    name: '桝（マス）',
+    group: 'existing',
+    work: '',
+    shape: 'point',
+    unit: '',
+    qty: 'none',
+    variants: [
+      { key: 'sewage', name: '汚水の桝', price: 0 },
+      { key: 'rain', name: '雨水の桝', price: 0 },
+    ],
+    fill: '#ffffff',
+    stroke: '#4a5560',
+    z: 4,
+  },
+  {
+    key: 'meter',
+    name: 'メーター',
+    group: 'existing',
+    work: '',
+    shape: 'point',
+    unit: '',
+    qty: 'none',
+    variants: [
+      { key: 'water', name: '水道メーター', price: 0 },
+      { key: 'gas', name: 'ガスメーター', price: 0 },
+    ],
+    fill: '#cfe0f2',
+    stroke: '#3d6c9c',
+    z: 4,
+  },
 ];
 
 const BY_KEY = new Map(CATALOG.map((c) => [c.key, c]));
@@ -549,7 +677,7 @@ export function variantOf(kind: string, variant: string): Variant {
   return c.variants.find((v) => v.key === variant) ?? c.variants[0];
 }
 
-/** 現調の結果（撤去など）から見積に入る項目。平面図には描かない。 */
+/** 平面図の部材以外で見積に入る項目（草刈り・共通費など） */
 export interface ExtraPrice {
   key: string;
   work: string;
@@ -560,11 +688,6 @@ export interface ExtraPrice {
 }
 
 export const EXTRA_PRICES: ExtraPrice[] = [
-  { key: 'demoBlock', work: '解体・撤去工事', name: '既存ブロック塀 解体・処分', spec: '長さ×高さ', unit: 'm²', price: 7200 },
-  { key: 'demoFence', work: '解体・撤去工事', name: '既存フェンス 撤去・処分', spec: '', unit: 'm', price: 2600 },
-  { key: 'demoConcrete', work: '解体・撤去工事', name: '既存コンクリート はつり・処分', spec: '厚さ10cm程度', unit: 'm²', price: 5600 },
-  { key: 'demoTree', work: '解体・撤去工事', name: '樹木 伐採・抜根・処分', spec: '中木程度', unit: '本', price: 22500 },
-  { key: 'demoShed', work: '解体・撤去工事', name: '既存物置 解体・処分', spec: '', unit: '台', price: 31000 },
   { key: 'weeding', work: '解体・撤去工事', name: '草刈り・整地', spec: '', unit: 'm²', price: 950 },
   { key: 'lightTrans', work: '設備工事', name: '照明用トランス・タイマー', spec: '屋外コンセントから接続', unit: '式', price: 36500 },
   { key: 'machine', work: '運搬・共通費', name: '重機回送・資材運搬費', spec: '小型ショベル・ダンプ', unit: '式', price: 33000 },
@@ -593,8 +716,18 @@ export function lineLength(it: PlanItem): number {
 
 /** ブロック塀の高さ(m) */
 export function blockHeight(it: PlanItem): number {
-  const rows = Number(it.props.rows ?? 3);
+  const rows = Number(it.props.rows ?? (it.kind === 'exBlock' ? 5 : 3));
   return r2(rows * BLOCK_ROW_HEIGHT);
+}
+
+/** 既存図に含まれるもの（建物と、いまあるもの）か。それ以外は「これから作るもの」 */
+export function isBaseItem(it: PlanItem): boolean {
+  return it.kind === 'house' || (hasKind(it.kind) && catalogOf(it.kind).group === 'existing');
+}
+
+/** 既存のもので、撤去することにしたもの */
+export function isRemoved(it: PlanItem): boolean {
+  return hasKind(it.kind) && catalogOf(it.kind).group === 'existing' && it.variant === 'remove';
 }
 
 /** 部材 1 つの数量（丸める前） */
@@ -650,7 +783,8 @@ export function createItem(kind: string, cx: number, cy: number, variantKey?: st
   }
   if (kind === 'steps') it.count = 2;
   if (kind === 'block') it.props.rows = 3;
-  if (kind === 'fence') it.props.baseRows = 0;
+  if (kind === 'exBlock') it.props.rows = 5;
+  if (kind === 'fence' || kind === 'exFence') it.props.baseRows = 0;
   if (kind === 'house') {
     it.props.floors = 2;
     it.props.roof = 'gable';

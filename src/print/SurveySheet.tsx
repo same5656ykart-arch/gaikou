@@ -1,7 +1,10 @@
 import type { PhotoRef, Project } from '../types';
+import { isBaseItem } from '../lib/catalog';
+import { existingSummary } from '../lib/existing';
 import { jpDate } from '../lib/format';
 import { usePhotoUrl } from '../lib/photos';
 import { PHOTO_SLOTS, STEPS, answerText, isAnswered, surveyAlerts, visibleQuestions } from '../lib/surveyDef';
+import { StaticPlan } from '../plan/PlanDrawing';
 
 function Photo({ photo }: { photo: PhotoRef }) {
   const url = usePhotoUrl(photo.id);
@@ -19,6 +22,8 @@ export function SurveySheet({ project }: { project: Project }) {
   const a = project.survey.answers;
   const alerts = surveyAlerts(a);
   const photos = project.survey.photos;
+  // 既存図には、これから作る部材は出さない
+  const existing = { ...project.plan, items: project.plan.items.filter(isBaseItem) };
   // 写真は 1 ページに 6 枚
   const pages: PhotoRef[][] = [];
   for (let i = 0; i < photos.length; i += 6) pages.push(photos.slice(i, i + 6));
@@ -49,7 +54,24 @@ export function SurveySheet({ project }: { project: Project }) {
         )}
 
         <div className="sheet-cols">
-          {STEPS.filter((s) => !s.custom || s.custom === 'size').map((s) => (
+          <section className="sheet-sec">
+            <h2>既存図</h2>
+            <dl>
+              {existingSummary(project.plan).map((r) => (
+                <div key={r.label}>
+                  <dt>{r.label}</dt>
+                  <dd>{r.value}</dd>
+                </div>
+              ))}
+              {typeof a.existingNote === 'string' && a.existingNote && (
+                <div>
+                  <dt>メモ</dt>
+                  <dd>{a.existingNote}</dd>
+                </div>
+              )}
+            </dl>
+          </section>
+          {STEPS.filter((s) => !s.custom).map((s) => (
             <section key={s.id} className="sheet-sec">
               <h2>{s.title}</h2>
               <dl>
@@ -67,6 +89,17 @@ export function SurveySheet({ project }: { project: Project }) {
             </section>
           ))}
         </div>
+      </article>
+
+      <article className="paper">
+        <header className="doc-head doc-head-sub">
+          <h1 className="doc-title-sub">既存図</h1>
+          <p className="doc-sub-meta">{project.name}　／　いまの敷地・建物・いまあるもの（道路は図の下側。赤い点線は撤去するもの）</p>
+        </header>
+        <div className="doc-plan">
+          <StaticPlan plan={existing} idp="sheet-" dims />
+        </div>
+        <p className="doc-caption">この図は現地調査の記録用の概略図です。</p>
       </article>
 
       {pages.map((page, i) => (

@@ -28,7 +28,7 @@ export interface Step {
   lead: string;
   questions: Question[];
   /** 専用の画面を持つステップ */
-  custom?: 'size' | 'photos' | 'summary';
+  custom?: 'existing' | 'photos' | 'summary';
   tip?: string;
 }
 
@@ -51,39 +51,11 @@ export const STEPS: Step[] = [
     ],
   },
   {
-    id: 'size',
-    title: '敷地のサイズ',
-    lead: '図のA〜Fを順番に測ります。この数字から平面図と3Dが自動でできます。',
-    custom: 'size',
-    tip: 'メジャーが届かないときは、ブロック1個の横幅＝40cm、大人の1歩＝約70cmで数えても大丈夫。あとから直せます。',
-    questions: [
-      { id: 'siteWidth', type: 'number', mark: 'A', label: '敷地の幅（間口）', unit: 'm', step: 0.1, min: 2, max: 80, hint: '道路に沿って、敷地の端から端まで' },
-      { id: 'siteDepth', type: 'number', mark: 'B', label: '敷地の奥行', unit: 'm', step: 0.1, min: 2, max: 80, hint: '道路との境から、いちばん奥まで' },
-      { id: 'houseWidth', type: 'number', mark: 'C', label: '建物の幅', unit: 'm', step: 0.1, min: 2, max: 60, hint: '道路と平行な向きの長さ' },
-      { id: 'houseDepth', type: 'number', mark: 'D', label: '建物の奥行', unit: 'm', step: 0.1, min: 2, max: 60 },
-      { id: 'houseFront', type: 'number', mark: 'E', label: '道路から建物まで', unit: 'm', step: 0.1, min: 0, max: 60, hint: '道路との境から、建物の手前の壁まで' },
-      { id: 'houseLeft', type: 'number', mark: 'F', label: '左の境から建物まで', unit: 'm', step: 0.1, min: 0, max: 60, hint: '道路から敷地を見て左側' },
-      {
-        id: 'houseDoor',
-        type: 'choice',
-        label: '玄関の位置（道路から見て）',
-        options: [
-          { v: 'left', label: '左寄り' },
-          { v: 'center', label: 'まん中' },
-          { v: 'right', label: '右寄り' },
-        ],
-      },
-      {
-        id: 'houseFloors',
-        type: 'choice',
-        label: '建物の階数',
-        options: [
-          { v: '1', label: '平屋' },
-          { v: '2', label: '2階建て' },
-          { v: '3', label: '3階建て' },
-        ],
-      },
-    ],
+    id: 'site',
+    title: '既存図',
+    lead: 'いまの敷地と建物を描きます。近いパターンを選んで、大きさを合わせるだけです。',
+    custom: 'existing',
+    questions: [],
   },
   {
     id: 'road',
@@ -183,53 +155,9 @@ export const STEPS: Step[] = [
     ],
   },
   {
-    id: 'existing',
-    title: '撤去するもの',
-    lead: 'いまあるもので、残すもの・撤去するものを確認します。数字は見積もりに入ります。',
-    questions: [
-      {
-        id: 'existingBlock',
-        type: 'choice',
-        label: 'いまあるブロック塀',
-        options: [
-          { v: 'none', label: 'ない' },
-          { v: 'keep', label: 'ある（そのまま使う）' },
-          { v: 'remove', label: 'ある（撤去したい）' },
-        ],
-      },
-      { id: 'demoBlockLength', type: 'number', label: '撤去するブロック塀の長さ', unit: 'm', step: 0.5, min: 0, max: 200, showIf: (a) => a.existingBlock === 'remove' },
-      { id: 'demoBlockHeight', type: 'number', label: '撤去するブロック塀の高さ', unit: 'm', step: 0.2, min: 0, max: 3, quick: [0.6, 1.0, 1.2, 1.6], hint: 'ブロック1段＝20cm。段数×0.2', showIf: (a) => a.existingBlock === 'remove' },
-      {
-        id: 'blockCondition',
-        type: 'choice',
-        label: 'ブロック塀の状態',
-        options: [
-          { v: 'ok', label: '問題なし' },
-          { v: 'damaged', label: 'ひび・傾きがある' },
-        ],
-        showIf: (a) => a.existingBlock === 'keep',
-      },
-      {
-        id: 'existingFence',
-        type: 'choice',
-        label: 'いまあるフェンス',
-        options: [
-          { v: 'none', label: 'ない' },
-          { v: 'keep', label: 'ある（そのまま使う）' },
-          { v: 'remove', label: 'ある（撤去したい）' },
-        ],
-      },
-      { id: 'demoFenceLength', type: 'number', label: '撤去するフェンスの長さ', unit: 'm', step: 0.5, min: 0, max: 200, showIf: (a) => a.existingFence === 'remove' },
-      { id: 'demoConcreteArea', type: 'number', label: '壊すコンクリート・アスファルトの広さ', unit: 'm²', step: 1, min: 0, max: 1000, hint: 'なければ空欄のまま。たて×よこ' },
-      { id: 'demoTreeCount', type: 'number', label: '切って根も抜く木の本数', unit: '本', step: 1, min: 0, max: 100, hint: 'なければ空欄のまま' },
-      { id: 'demoShedCount', type: 'number', label: '撤去する物置の数', unit: '台', step: 1, min: 0, max: 20, hint: 'なければ空欄のまま' },
-      { id: 'existingNote', type: 'textarea', label: 'そのほか、残すもの・撤去するもの', placeholder: '例：古い門柱は撤去。庭石は残す。' },
-    ],
-  },
-  {
     id: 'utilities',
     title: '設備の位置',
-    lead: 'メーターや桝（マス）を探します。見つけたらチェックして、写真も撮っておきましょう。',
+    lead: 'メーターや桝（マス）を探します。見つけたらチェックして、写真も撮っておきましょう。場所は既存図にも置けます。',
     tip: '桝（マス）は地面にある丸や四角のフタです。コンクリートを打つ場所にあると、高さの調整が必要になります。',
     questions: [
       {
@@ -260,53 +188,6 @@ export const STEPS: Step[] = [
         ],
       },
       { id: 'utilitiesNote', type: 'textarea', label: 'メモ', placeholder: '例：駐車場の予定地に汚水桝が2つ。' },
-    ],
-  },
-  {
-    id: 'access',
-    title: '工事のしやすさ',
-    lead: '工事車両や機械が入れるかを確認します。金額に影響します。',
-    questions: [
-      {
-        id: 'truckParking',
-        type: 'choice',
-        label: '工事のトラック（2t）を停める場所',
-        options: [
-          { v: 'site', label: '敷地の中に停められる' },
-          { v: 'road', label: '前の道路に停められる' },
-          { v: 'hard', label: '停めにくい' },
-        ],
-      },
-      {
-        id: 'machineAccess',
-        type: 'choice',
-        label: '小型ショベル（幅1.5mくらい）が入れる？',
-        hint: '工事する場所まで、幅1.5m以上の通り道があるか',
-        options: [
-          { v: 'yes', label: '入れる' },
-          { v: 'no', label: '入れない' },
-          { v: 'unknown', label: 'わからない' },
-        ],
-      },
-      {
-        id: 'neighbors',
-        type: 'choice',
-        label: 'お隣の建物との距離',
-        options: [
-          { v: 'far', label: '余裕がある' },
-          { v: 'near', label: '近い（1m未満）' },
-        ],
-      },
-      {
-        id: 'overhead',
-        type: 'choice',
-        label: '上にある障害物（電線・木の枝・ひさし）',
-        options: [
-          { v: 'no', label: 'ない' },
-          { v: 'yes', label: 'ある' },
-        ],
-      },
-      { id: 'accessNote', type: 'textarea', label: 'メモ', placeholder: '例：通学路のため朝8時台は車両通行不可。' },
     ],
   },
   {
@@ -444,7 +325,7 @@ export const PHOTO_SLOTS: { key: string; label: string; must?: boolean }[] = [
   { key: 'boundaryB', label: '奥の境界' },
   { key: 'meter', label: 'メーター・桝' },
   { key: 'level', label: '高さの差がわかる写真' },
-  { key: 'road', label: '前の道路・搬入経路' },
+  { key: 'road', label: '前の道路' },
   { key: 'other', label: 'そのほか' },
 ];
 
@@ -463,9 +344,11 @@ export function stepProgress(step: Step, a: Answers, photoCount = 0): { done: nu
   if (step.custom === 'photos') {
     return { done: Math.min(photoCount, 3), total: 3 };
   }
-  const qs = visibleQuestions(step, a).filter((q) => q.type !== 'textarea');
-  // 「なければ空欄」の質問は必須扱いにしない
-  const required = qs.filter((q) => !(q.type === 'number' && /^demo(Concrete|Tree|Shed)/.test(q.id)));
+  // 既存図は、内容を確かめた（直した・次へ進んだ）ら完了
+  if (step.custom === 'existing') {
+    return { done: a.siteChecked === 'yes' ? 1 : 0, total: 1 };
+  }
+  const required = visibleQuestions(step, a).filter((q) => q.type !== 'textarea');
   return { done: required.filter((q) => isAnswered(a[q.id])).length, total: required.length };
 }
 
@@ -567,40 +450,12 @@ export function surveyAlerts(a: Answers): SurveyAlert[] {
       body: 'コンクリートを打つ場合は桝の高さ調整（1か所 5,000〜15,000円程度）が必要です。数を数えて手入力で追加してください。',
     });
   }
-  if (a.machineAccess === 'no') {
-    out.push({
-      level: 'warn',
-      title: '小型ショベルが入れない',
-      body: '手作業になるため、掘削や運搬の手間が増えます。「重機回送・資材運搬費」を外し、人力作業の割増を手入力で追加してください。',
-    });
-  }
-  if (a.truckParking === 'hard') {
-    out.push({
-      level: 'info',
-      title: 'トラックを停めにくい',
-      body: '近くの駐車場代や、資材を手で運ぶ費用（小運搬）がかかることがあります。',
-    });
-  }
   const road = typeof a.roadWidth === 'number' ? a.roadWidth : Number(a.roadWidth);
   if (Number.isFinite(road) && road > 0 && road < 4) {
     out.push({
       level: 'info',
       title: '前の道路がせまい',
       body: '生コン車やダンプが入れないことがあります。小型車での搬入になり費用が上がる場合があります。',
-    });
-  }
-  if (a.overhead === 'yes' && wants.includes('carport')) {
-    out.push({
-      level: 'info',
-      title: 'カーポートの上に障害物がある',
-      body: '電線・ひさし・木の枝と屋根がぶつからないか、高さを確認してください。',
-    });
-  }
-  if (a.neighbors === 'near') {
-    out.push({
-      level: 'info',
-      title: 'お隣が近い',
-      body: '工事前のあいさつと、ほこり・音への配慮（養生シートなど）を忘れずに。',
     });
   }
   return out;

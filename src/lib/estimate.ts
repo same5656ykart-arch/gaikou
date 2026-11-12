@@ -7,6 +7,7 @@ import {
   catalogOf,
   extraPrice,
   hasKind,
+  isRemoved,
   itemQty,
   lineLength,
   priceKey,
@@ -65,14 +66,9 @@ function n(v: unknown): number {
   return Number.isFinite(x) && x > 0 ? x : 0;
 }
 
-/** 現調の回答から、撤去などの数量を取り出す */
+/** 現調の回答から決まる数量（撤去するものは既存図の部材から計算する） */
 export function surveyQuantities(a: Answers): Record<string, number> {
   const q: Record<string, number> = {};
-  if (a.existingBlock === 'remove') q.demoBlock = n(a.demoBlockLength) * n(a.demoBlockHeight);
-  if (a.existingFence === 'remove') q.demoFence = n(a.demoFenceLength);
-  q.demoConcrete = n(a.demoConcreteArea);
-  q.demoTree = n(a.demoTreeCount);
-  q.demoShed = n(a.demoShedCount);
   if (Array.isArray(a.groundType) && a.groundType.includes('weeds')) q.weeding = n(a.weedArea);
   return q;
 }
@@ -103,11 +99,14 @@ function planLines(plan: Plan | null, prices: Record<string, number>): RawLine[]
     if (!hasKind(it.kind)) continue;
     const c = catalogOf(it.kind);
     if (c.qty === 'none') continue;
-    add(it.kind, variantOf(it.kind, it.variant).key, itemQty(it));
-    // フェンスの下のブロックは普通ブロックとして別計上
-    if (it.kind === 'fence') {
-      const rows = n(it.props.baseRows);
-      if (rows > 0) add('block', 'cb', lineLength(it) * rows * BLOCK_ROW_HEIGHT);
+    const v = variantOf(it.kind, it.variant);
+    if (v.skip) continue; // 既存のものを「そのまま残す」
+    add(it.kind, v.key, itemQty(it));
+    // フェンスの下のブロックは別計上（新設は普通ブロック、既存の撤去はブロック解体）
+    const rows = n(it.props.baseRows);
+    if (rows > 0) {
+      if (it.kind === 'fence') add('block', 'cb', lineLength(it) * rows * BLOCK_ROW_HEIGHT);
+      if (it.kind === 'exFence') add('exBlock', 'remove', lineLength(it) * rows * BLOCK_ROW_HEIGHT);
     }
   }
   const out: RawLine[] = [];
@@ -115,7 +114,7 @@ function planLines(plan: Plan | null, prices: Record<string, number>): RawLine[]
   for (const c of CATALOG) {
     for (const v of c.variants) {
       const s = sums.get(priceKey(c.key, v.key));
-      if (!s) continue;
+      if (!s || v.skip) continue;
       out.push({
         id: `plan:${c.key}:${v.key}`,
         source: 'plan',
@@ -157,18 +156,14 @@ export function buildEstimate(
 ): Estimate {
   const raw: RawLine[] = [];
   const sq = surveyQuantities(answers);
-  for (const key of ['demoBlock', 'demoFence', 'demoConcrete', 'demoTree', 'demoShed', 'weeding']) {
-    if ((sq[key] ?? 0) > 0) raw.push(extraLine(key, sq[key], 'survey', settings.prices));
-  }
+  if ((sq.weeding ?? 0) > 0) raw.push(extraLine('weeding', sq.weeding, 'survey', settings.prices));
   const pl = planLines(plan, settings.prices);
   raw.push(...pl);
   if (plan?.items.some((it) => it.kind === 'light')) {
     raw.push(extraLine('lightTrans', 1, 'auto', settings.prices));
   }
   const needsMachine =
-    (plan?.items.some((it) => MACHINE_KINDS.has(it.kind)) ?? false) ||
-    (sq.demoBlock ?? 0) > 0 ||
-    (sq.demoConcrete ?? 0) > 0;
+    plan?.items.some((it) => MACHINE_KINDS.has(it.kind) || ((it.kind === 'exBlock' || it.kind === 'exConcrete') && isRemoved(it))) ?? false;
   if (needsMachine) raw.push(extraLine('machine', 1, 'auto', settings.prices));
 
   for (const m of est.manual) {

@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import type { Plan, PlanItem } from '../types';
-import { BLOCK_ROW_HEIGHT, catalogOf, hasKind, lineLength, variantOf } from '../lib/catalog';
+import { BLOCK_ROW_HEIGHT, catalogOf, hasKind, isRemoved, lineLength, variantOf } from '../lib/catalog';
 import { clamp } from '../lib/format';
 
 // 平面図から 3D のシーンを組み立てる。
@@ -788,7 +788,9 @@ function blockWall(ctx: Ctx, g: THREE.Object3D, len: number, H: number, variant:
   const m =
     variant === 'form'
       ? ctx.mat('formBlock', () => ctx.textured('block', { color: 0xb5b6b4, roughness: 0.95 }))
-      : ctx.mat('tex:' + name, () => ctx.textured(name, { roughness: 0.95 }));
+      : variant === 'old'
+        ? ctx.mat('oldBlock', () => ctx.textured('block', { color: 0xcfcbc0, roughness: 1 }))
+        : ctx.mat('tex:' + name, () => ctx.textured(name, { roughness: 0.95 }));
   const t = variant === 'form' ? 0.15 : 0.12;
   box(g, len + t, H, t, m, len / 2, H / 2, 0);
 }
@@ -1028,12 +1030,14 @@ function floorMaterial(ctx: Ctx, it: PlanItem): { m: THREE.Material; t: number }
       return { m: tex(it.variant === 'tile' ? 'tile30' : it.variant === 'stone' ? 'stone' : it.variant === 'brick' ? 'brick' : 'wash', 0.85), t: 0.06 };
     case 'lawn':
       return { m: tex(it.variant === 'artificial' ? 'grassArt' : 'grass', 1), t: 0.035 };
+    case 'exConcrete':
+      return { m: ctx.mat('oldConcrete', () => ctx.textured('concrete', { color: 0xd2cfc6, roughness: 1 })), t: 0.04 };
     default:
       return { m: tex('concrete'), t: 0.05 };
   }
 }
 
-const FLOOR_KINDS = new Set(['concrete', 'asphalt', 'gravel', 'paving', 'tile', 'approach', 'lawn']);
+const FLOOR_KINDS = new Set(['concrete', 'asphalt', 'gravel', 'paving', 'tile', 'approach', 'lawn', 'exConcrete']);
 
 // ---------------------------------------------------------------------------
 
@@ -1208,6 +1212,8 @@ export function buildScene(plan: Plan, opts: SceneOptions): BuiltScene {
   let carIndex = 0;
   for (const it of plan.items) {
     if (!hasKind(it.kind)) continue;
+    // 撤去するものは、完成イメージには出さない
+    if (isRemoved(it)) continue;
     const c = catalogOf(it.kind);
     if (FLOOR_KINDS.has(it.kind)) {
       const { m, t } = floorMaterial(ctx, it);
@@ -1249,6 +1255,31 @@ export function buildScene(plan: Plan, opts: SceneOptions): BuiltScene {
       }
       case 'fence':
         buildFence(ctx, it);
+        break;
+      // ---- いまあるもの（残すもの） ----
+      case 'exBlock': {
+        const { g, len } = lineGroup(ctx, it);
+        if (len >= 0.05) blockWall(ctx, g, len, Math.max(1, Number(it.props.rows ?? 5)) * BLOCK_ROW_HEIGHT, 'old');
+        break;
+      }
+      case 'exFence':
+        buildFence(ctx, { ...it, kind: 'fence', variant: 'mesh' });
+        break;
+      case 'exTree':
+        buildTree(ctx, { ...it, kind: 'tree', variant: 'symbol' });
+        break;
+      case 'exShed':
+        buildShed(ctx, { ...it, variant: 'm' });
+        break;
+      case 'masu': {
+        const lid = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.2, 0.02, 20), flat(it.variant === 'rain' ? 0x8f969c : 0x6f767d, { roughness: 0.7, metalness: 0.4 }));
+        lid.position.set(it.x, 0.075, -it.y);
+        lid.receiveShadow = true;
+        root.add(lid);
+        break;
+      }
+      case 'meter':
+        box(root, 0.44, 0.02, 0.28, flat(it.variant === 'gas' ? 0xc9b36a : 0x4f7fb0, { roughness: 0.6, metalness: 0.3 }), it.x, 0.075, -it.y, { cast: false });
         break;
       case 'curb': {
         const { g, len } = lineGroup(ctx, it);

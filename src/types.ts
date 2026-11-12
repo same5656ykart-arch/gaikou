@@ -84,7 +84,8 @@ export interface Project {
   updatedAt: number;
   sample?: boolean;
   survey: Survey;
-  plan: Plan | null;
+  /** 既存図（敷地・建物・いまあるもの）と、これから作る部材。案件を作った時点で建物入りで用意する */
+  plan: Plan;
   estimate: EstimateState;
   /** 提案書に載せる 3D パース画像（写真ストアの ID） */
   perspectiveId?: string;

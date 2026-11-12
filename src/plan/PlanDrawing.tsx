@@ -1,6 +1,6 @@
 import type { PointerEvent as ReactPointerEvent, ReactNode } from 'react';
 import type { Plan, PlanItem } from '../types';
-import { catalogOf, hasKind, lineLength, variantOf } from '../lib/catalog';
+import { catalogOf, hasKind, isRemoved, lineLength, variantOf } from '../lib/catalog';
 import { meters } from '../lib/format';
 
 // 平面図の描画。エディタと印刷（見積書の添付図）の両方で使う。
@@ -27,6 +27,7 @@ export function sortedItems(plan: Plan): PlanItem[] {
 
 export function treeRadius(it: PlanItem): number {
   if (it.kind === 'tree') return it.variant === 'mid' ? 0.6 : 0.95;
+  if (it.kind === 'exTree') return 0.8;
   if (it.kind === 'shrub') return it.variant === 'ground' ? 0.22 : 0.32;
   return 0.2;
 }
@@ -37,7 +38,9 @@ export function pointSize(it: PlanItem): [number, number] {
   let d = 0.4;
   if (it.kind === 'gatepost') [w, d] = it.variant === 'func' ? [0.45, 0.18] : [1.2, 0.2];
   else if (it.kind === 'gate') [w, d] = [variantOf('gate', it.variant).width ?? 0.8, 0.12];
-  else if (it.kind === 'tree' || it.kind === 'shrub') w = d = treeRadius(it) * 2;
+  else if (it.kind === 'tree' || it.kind === 'shrub' || it.kind === 'exTree') w = d = treeRadius(it) * 2;
+  else if (it.kind === 'masu') w = d = 0.44;
+  else if (it.kind === 'meter') [w, d] = [0.44, 0.28];
   else if (it.kind === 'faucet') w = d = 0.34;
   else if (it.kind === 'light') w = d = 0.3;
   return it.rot === 90 ? [d, w] : [w, d];
@@ -93,6 +96,9 @@ function Defs({ idp }: { idp: string }) {
         <rect width="0.5" height="0.5" fill="rgba(111,160,196,0.22)" />
         <path d="M0 0V0.5" stroke="rgba(63,111,147,0.45)" strokeWidth="0.03" fill="none" />
       </pattern>
+      <pattern id={`${idp}remove`} width="0.3" height="0.3" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+        <path d="M0 0V0.3" stroke="#c2362b" strokeOpacity="0.55" strokeWidth="0.05" fill="none" />
+      </pattern>
       <pattern id={`${idp}flowerbed`} width="0.4" height="0.4" patternUnits="userSpaceOnUse">
         <rect width="0.4" height="0.4" fill="#a98566" />
         <circle cx="0.1" cy="0.12" r="0.06" fill="#6fa862" />
@@ -103,6 +109,9 @@ function Defs({ idp }: { idp: string }) {
     </defs>
   );
 }
+
+/** 撤去するものを示す赤 */
+const REMOVE = '#c2362b';
 
 const PATTERNED = new Set(['gravel', 'lawn', 'tile', 'brick', 'stone', 'deck', 'carport', 'flowerbed']);
 
@@ -169,7 +178,7 @@ function RectExtras({ it }: { it: PlanItem }): ReactNode {
     for (let i = 1; i < n; i++) lines.push(`M${x} ${top + (h * i) / n}h${w}`);
     return <path d={lines.join('')} stroke="#8f8672" strokeWidth={1} vectorEffect="non-scaling-stroke" fill="none" />;
   }
-  if (it.kind === 'shed') {
+  if (it.kind === 'shed' || it.kind === 'exShed') {
     return <path d={`M${x} ${top}L${x + w} ${-y}M${x + w} ${top}L${x} ${-y}`} stroke="#8d97a1" strokeWidth={1} vectorEffect="non-scaling-stroke" fill="none" />;
   }
   return null;
@@ -195,6 +204,7 @@ function RectShape({ it, idp }: { it: PlanItem; idp: string }) {
         />
       )}
       <RectExtras it={it} />
+      {isRemoved(it) && <rect x={x} y={-(y + h)} width={w} height={h} fill={`url(#${idp}remove)`} stroke={REMOVE} strokeWidth={2} strokeDasharray="7 4" vectorEffect="non-scaling-stroke" />}
     </>
   );
 }
@@ -207,13 +217,14 @@ function RectLabel({ it, mpp }: { it: PlanItem; mpp: number }) {
   const fs = 11 * mpp;
   const wPx = w / mpp;
   const hPx = h / mpp;
-  const name = it.kind === 'car' ? '' : c.name;
+  const removed = isRemoved(it);
+  const name = it.kind === 'car' ? '' : removed ? '撤去' : c.name;
   const showName = name !== '' && wPx > name.length * 11 + 6 && hPx > 18;
   const showSize = showName && it.kind !== 'house' && hPx > 34 && wPx > 62;
   if (!showName) return null;
   return (
     <>
-      <text className="plan-label" x={x + w / 2} y={top + h / 2 + (showSize ? -fs * 0.2 : fs * 0.36)} fontSize={fs} textAnchor="middle">
+      <text className={'plan-label' + (removed ? ' is-remove' : '')} x={x + w / 2} y={top + h / 2 + (showSize ? -fs * 0.2 : fs * 0.36)} fontSize={fs} textAnchor="middle">
         {name}
       </text>
       {showSize && (
@@ -225,21 +236,37 @@ function RectLabel({ it, mpp }: { it: PlanItem; mpp: number }) {
   );
 }
 
-/** 線の長さのラベル */
-function LineLabel({ it, mpp }: { it: PlanItem; mpp: number }) {
+/**
+ * 線のラベル。これから作るものは長さ、既存のものは「既存ブロック」などの名前、撤去するものは「撤去」。
+ * boundary = 敷地の境界上（長さは敷地の寸法と同じなので省く）
+ */
+function LineLabel({ it, mpp, boundary, plan }: { it: PlanItem; mpp: number; boundary: boolean; plan: Plan }) {
   const len = lineLength(it);
-  if (len / mpp <= 56) return null;
+  const old = it.kind === 'exBlock' || it.kind === 'exFence';
+  const removed = isRemoved(it);
+  if (len / mpp <= 56 || (boundary && !old)) return null;
   const x1 = it.x;
   const y1 = -it.y;
   const x2 = it.x2;
   const y2 = -it.y2;
   const mx = (x1 + x2) / 2;
   const my = (y1 + y2) / 2;
+  // 文字が逆さにならない向きにそろえる。縦の線は、図面の習慣どおり下から上へ読む向き（-90 度）
   let angle = (Math.atan2(y2 - y1, x2 - x1) * 180) / Math.PI;
-  if (angle > 90 || angle <= -90) angle += 180;
+  if (angle >= 90 || angle < -90) angle += 180;
+  let text = meters(len);
+  if (old) {
+    const name = removed ? '撤去' : it.kind === 'exBlock' ? '既存ブロック' : Number(it.props.baseRows ?? 0) > 0 ? '既存ブロック＋フェンス' : '既存フェンス';
+    text = boundary ? name : `${name} ${meters(len)}`;
+  }
+  // 境界上のラベルは、敷地の寸法と重ならないよう内側に寄せる。
+  // 文字を線に沿って回したあとの「下」が敷地の内側になるのは、奥の辺と左の辺
+  const e = 0.06;
+  const inwardIsDown = (Math.abs(it.y - plan.site.depth) < e && Math.abs(it.y2 - plan.site.depth) < e) || (Math.abs(it.x) < e && Math.abs(it.x2) < e);
+  const offset = boundary ? (inwardIsDown ? 15 : -8) : -6;
   return (
-    <text className="plan-len" x={mx} y={my} fontSize={10 * mpp} textAnchor="middle" transform={`rotate(${angle} ${mx} ${my}) translate(0 ${-6 * mpp})`}>
-      {meters(len)}
+    <text className={'plan-len' + (removed ? ' is-remove' : '')} x={mx} y={my} fontSize={10 * mpp} textAnchor="middle" transform={`rotate(${angle} ${mx} ${my}) translate(0 ${offset * mpp})`}>
+      {text}
     </text>
   );
 }
@@ -256,6 +283,15 @@ function LineItem({ it }: { it: PlanItem }) {
   const nx = -uy;
   const ny = ux;
 
+  if (it.kind === 'exBlock') {
+    const removed = isRemoved(it);
+    return (
+      <>
+        <line x1={x1} y1={y1} x2={x2} y2={y2} stroke={removed ? '#e3aaa4' : '#b3b7bc'} strokeWidth={0.15} />
+        <line x1={x1} y1={y1} x2={x2} y2={y2} stroke={removed ? REMOVE : '#70767d'} strokeWidth={removed ? 2 : 1} vectorEffect="non-scaling-stroke" strokeDasharray={removed ? '7 4' : '1 5'} />
+      </>
+    );
+  }
   if (it.kind === 'block') {
     return (
       <>
@@ -274,9 +310,19 @@ function LineItem({ it }: { it: PlanItem }) {
   for (let i = 0; i <= n; i++) {
     const px = x1 + (ux * len * i) / n;
     const py = y1 + (uy * len * i) / n;
-    posts.push(<line key={i} x1={px - nx * t} y1={py - ny * t} x2={px + nx * t} y2={py + ny * t} stroke="#2f5879" strokeWidth={2} vectorEffect="non-scaling-stroke" />);
+    posts.push(<line key={i} x1={px - nx * t} y1={py - ny * t} x2={px + nx * t} y2={py + ny * t} stroke={it.kind === 'exFence' ? '#6c7680' : '#2f5879'} strokeWidth={2} vectorEffect="non-scaling-stroke" />);
   }
   const baseRows = Number(it.props.baseRows ?? 0);
+  if (it.kind === 'exFence') {
+    const removed = isRemoved(it);
+    return (
+      <>
+        {baseRows > 0 && <line x1={x1} y1={y1} x2={x2} y2={y2} stroke={removed ? '#e3aaa4' : '#b3b7bc'} strokeWidth={0.15} />}
+        <line x1={x1} y1={y1} x2={x2} y2={y2} stroke={removed ? REMOVE : '#6c7680'} strokeWidth={2} strokeDasharray={removed ? '7 4' : undefined} vectorEffect="non-scaling-stroke" />
+        {!removed && posts}
+      </>
+    );
+  }
   const privacy = it.variant.startsWith('privacy') || it.variant.startsWith('wood');
   return (
     <>
@@ -302,6 +348,44 @@ function PointItem({ it }: { it: PlanItem }) {
             <circle cx={x} cy={y} r={0.07} fill="#5b4632" />
           </>
         )}
+      </>
+    );
+  }
+  if (it.kind === 'exTree') {
+    const r = treeRadius(it);
+    const removed = isRemoved(it);
+    const k = r * 0.6;
+    return (
+      <>
+        <circle cx={x} cy={y} r={r} fill="#a9bfa6" fillOpacity={0.45} stroke={removed ? REMOVE : '#5f7f61'} strokeWidth={removed ? 2 : 1.4} strokeDasharray={removed ? '7 4' : undefined} vectorEffect="non-scaling-stroke" />
+        <circle cx={x} cy={y} r={0.07} fill="#5b4632" />
+        {removed && <path d={`M${x - k} ${y - k}L${x + k} ${y + k}M${x + k} ${y - k}L${x - k} ${y + k}`} stroke={REMOVE} strokeWidth={2} vectorEffect="non-scaling-stroke" />}
+      </>
+    );
+  }
+  if (it.kind === 'masu') {
+    // 図面でよく使う記号：丸に×（汚水）、二重丸（雨水）
+    const r = 0.2;
+    const k = r * 0.7;
+    return (
+      <>
+        <circle cx={x} cy={y} r={r} fill="#ffffff" stroke="#4a5560" strokeWidth={1.4} vectorEffect="non-scaling-stroke" />
+        {it.variant === 'rain' ? (
+          <circle cx={x} cy={y} r={r * 0.5} fill="none" stroke="#4a5560" strokeWidth={1.2} vectorEffect="non-scaling-stroke" />
+        ) : (
+          <path d={`M${x - k} ${y - k}L${x + k} ${y + k}M${x + k} ${y - k}L${x - k} ${y + k}`} stroke="#4a5560" strokeWidth={1.2} vectorEffect="non-scaling-stroke" />
+        )}
+      </>
+    );
+  }
+  if (it.kind === 'meter') {
+    const gas = it.variant === 'gas';
+    return (
+      <>
+        <rect x={x - 0.22} y={y - 0.14} width={0.44} height={0.28} rx={0.04} fill={gas ? '#f6e3b0' : '#cfe0f2'} stroke={gas ? '#9a7a1c' : '#3d6c9c'} strokeWidth={1.4} vectorEffect="non-scaling-stroke" />
+        <text x={x} y={y + 0.075} fontSize={0.2} fontWeight={700} textAnchor="middle" fill={gas ? '#7a5f10' : '#2d5580'}>
+          {gas ? 'G' : 'M'}
+        </text>
       </>
     );
   }
@@ -411,7 +495,7 @@ export function PlanDrawing({ plan, mpp, idp, onItemDown, showGrid = true }: Pro
             const covered = items.slice(i + 1).some((o) => o.kind !== 'car' && catalogOf(o.kind).shape === 'rect' && cx > o.x && cx < o.x + o.w && cy > o.y && cy < o.y + o.h);
             return covered ? null : <RectLabel key={it.id} it={it} mpp={mpp} />;
           }
-          if (shape === 'line' && !onBoundary(it, plan)) return <LineLabel key={it.id} it={it} mpp={mpp} />;
+          if (shape === 'line') return <LineLabel key={it.id} it={it} mpp={mpp} boundary={onBoundary(it, plan)} plan={plan} />;
           return null;
         })}
       </g>
@@ -428,6 +512,56 @@ export function PlanDrawing({ plan, mpp, idp, onItemDown, showGrid = true }: Pro
   );
 }
 
+/** 寸法などを入れる丸いタグ */
+export function SizeTag({ x, y, text, fs, vertical, tone, align }: { x: number; y: number; text: string; fs: number; vertical?: boolean; tone?: 'guide'; align?: 'start' }) {
+  // 全角文字は幅が広いので、文字の種類ごとに幅を見積もる
+  const units = [...text].reduce((n, ch) => n + (ch.charCodeAt(0) > 0xff ? 1 : 0.6), 0);
+  const w = (units + 1.1) * fs;
+  const h = fs * 1.7;
+  // align="start" は、x をタグの左端にする
+  const cx = align === 'start' ? x + w / 2 : x;
+  return (
+    <g className={'size-tag' + (tone ? ' size-tag-' + tone : '')} transform={`translate(${cx} ${y})${vertical ? ' rotate(-90)' : ''}`} pointerEvents="none">
+      <rect x={-w / 2} y={-h / 2} width={w} height={h} rx={h / 2} />
+      <text y={fs * 0.36} fontSize={fs} textAnchor="middle">
+        {text}
+      </text>
+    </g>
+  );
+}
+
+/** 既存図：建物の大きさと、道路・左の境界からの距離 */
+export function HouseDims({ house, mpp, showSize }: { house: PlanItem; mpp: number; showSize: boolean }) {
+  const fs = 11 * mpp;
+  const cx = house.x + house.w / 2;
+  const cy = house.y + house.h / 2;
+  // 「左から」の線は、建物の手前寄りの高さに引く
+  const ly = house.y + house.h * 0.22;
+  return (
+    <g className="house-dims" pointerEvents="none">
+      {house.y > 0.05 && (
+        <>
+          <path className="dim-guide" d={`M${cx} 0V${-house.y}`} strokeWidth={1.5} vectorEffect="non-scaling-stroke" />
+          <SizeTag x={cx} y={-house.y / 2} text={`道路から ${meters(house.y)}`} fs={fs} tone="guide" />
+        </>
+      )}
+      {house.x > 0.05 && (
+        <>
+          <path className="dim-guide" d={`M0 ${-ly}H${house.x}`} strokeWidth={1.5} vectorEffect="non-scaling-stroke" />
+          {/* すき間はせまいことが多いので、タグは建物の中（左端）に出す */}
+          <SizeTag x={house.x + 6 * mpp} y={-ly} text={`左から ${meters(house.x)}`} fs={fs} tone="guide" align="start" />
+        </>
+      )}
+      {showSize && (
+        <>
+          <SizeTag x={cx} y={-(house.y + house.h) + 14 * mpp} text={`幅 ${meters(house.w)}`} fs={fs} tone="guide" />
+          <SizeTag x={house.x + house.w - 14 * mpp} y={-cy} text={`奥行 ${meters(house.h)}`} fs={fs} tone="guide" vertical />
+        </>
+      )}
+    </g>
+  );
+}
+
 /** 図全体が入る表示範囲（m）。印刷用の静的な図にも使う */
 export function planBounds(plan: Plan): { x: number; y: number; w: number; h: number } {
   const road = Math.min(plan.roadWidth, 3.2);
@@ -440,13 +574,15 @@ export function planBounds(plan: Plan): { x: number; y: number; w: number; h: nu
   };
 }
 
-/** 操作なしの静的な平面図（印刷・サムネイル用） */
-export function StaticPlan({ plan, idp, widthPx = 680 }: { plan: Plan; idp: string; widthPx?: number }) {
+/** 操作なしの静的な平面図（印刷用）。dims を付けると、建物の寸法と距離も入れる（既存図用） */
+export function StaticPlan({ plan, idp, widthPx = 680, dims = false }: { plan: Plan; idp: string; widthPx?: number; dims?: boolean }) {
   const b = planBounds(plan);
   const mpp = b.w / widthPx;
+  const house = dims ? plan.items.find((it) => it.kind === 'house') : undefined;
   return (
-    <svg className="plan-static" viewBox={`${b.x} ${b.y} ${b.w} ${b.h}`} role="img" aria-label="平面図">
+    <svg className="plan-static" viewBox={`${b.x} ${b.y} ${b.w} ${b.h}`} role="img" aria-label={dims ? '既存図' : '平面図'}>
       <PlanDrawing plan={plan} mpp={mpp} idp={idp} />
+      {house && <HouseDims house={house} mpp={mpp} showSize />}
     </svg>
   );
 }
