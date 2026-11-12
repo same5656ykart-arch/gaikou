@@ -86,13 +86,45 @@ describe('buildEstimate', () => {
     expect(r.total).toBe(0);
   });
 
-  it('現調の撤去数量が見積もりに入る', () => {
-    const answers = { existingBlock: 'remove', demoBlockLength: 10, demoBlockHeight: 1.2, demoTreeCount: 2, groundType: ['weeds'], weedArea: 30 };
-    expect(surveyQuantities(answers)).toMatchObject({ demoBlock: 12, demoTree: 2, weeding: 30 });
-    const r = buildEstimate(null, answers, est, settings);
-    expect(r.lines.find((l) => l.id === 'extra:demoBlock')!.amount).toBe(12 * 7200);
-    expect(r.lines.find((l) => l.id === 'extra:demoTree')!.amount).toBe(45000);
+  it('既存のものは「撤去する」にしたものだけ見積もりに入る', () => {
+    const wall = createItem('exBlock', 5, 5, 'remove'); // 10m × 6段(1.2m)
+    wall.x = 0;
+    wall.y = 0;
+    wall.x2 = 0;
+    wall.y2 = 10;
+    wall.props.rows = 6;
+    const kept = createItem('exBlock', 5, 5, 'keep');
+    const trees = [createItem('exTree', 1, 1, 'remove'), createItem('exTree', 2, 2, 'remove'), createItem('exTree', 3, 3, 'keep')];
+    const r = buildEstimate(planWith(wall, kept, ...trees, createItem('masu', 4, 4)), {}, est, settings);
+    const block = r.lines.find((l) => l.id === 'plan:exBlock:remove')!;
+    expect(block.qty).toBe(12);
+    expect(block.amount).toBe(12 * 7200);
+    expect(block.work).toBe('解体・撤去工事');
+    expect(r.lines.find((l) => l.id === 'plan:exTree:remove')!.amount).toBe(45000);
+    // 残すもの・桝は行にならない
+    expect(r.lines.some((l) => l.id.includes(':keep') || l.id.includes('masu'))).toBe(false);
+    // ブロックを壊すので重機回送が入る
     expect(r.lines.some((l) => l.id === 'extra:machine')).toBe(true);
+  });
+
+  it('既存フェンスの撤去は、下のブロックの解体も別に計上する', () => {
+    const f = createItem('exFence', 5, 5, 'remove');
+    f.x = 0;
+    f.y = 8;
+    f.x2 = 10;
+    f.y2 = 8;
+    f.props.baseRows = 2;
+    const r = buildEstimate(planWith(f), {}, est, settings);
+    expect(r.lines.find((l) => l.id === 'plan:exFence:remove')!.amount).toBe(10 * 2600);
+    expect(r.lines.find((l) => l.id === 'plan:exBlock:remove')!.qty).toBe(4);
+    expect(buildEstimate(planWith({ ...f, variant: 'keep' }), {}, est, settings).lines).toHaveLength(0);
+  });
+
+  it('草刈りは現調の回答から入る', () => {
+    const answers = { groundType: ['weeds'], weedArea: 30 };
+    expect(surveyQuantities(answers)).toEqual({ weeding: 30 });
+    const r = buildEstimate(null, answers, est, settings);
+    expect(r.lines.find((l) => l.id === 'extra:weeding')!.amount).toBe(30 * 950);
   });
 
   it('設定の単価表・行ごとの手入力・除外が反映される', () => {

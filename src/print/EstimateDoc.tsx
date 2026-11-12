@@ -151,20 +151,18 @@ export function EstimateDoc({ project, settings, estimate }: Props) {
         </div>
       </article>
 
-      {project.plan && (
-        <article className="paper">
-          <header className="doc-head doc-head-sub">
-            <h1 className="doc-title-sub">平面図</h1>
-            <p className="doc-sub-meta">
-              {project.name}　／　敷地 {num(project.plan.site.width)}m × {num(project.plan.site.depth)}m（道路は図の下側）
-            </p>
-          </header>
-          <div className="doc-plan">
-            <StaticPlan plan={project.plan} idp="print-" />
-          </div>
-          <p className="doc-caption">この図は打ち合わせ用の概略図です。実際の寸法は現地での実測によります。</p>
-        </article>
-      )}
+      <article className="paper">
+        <header className="doc-head doc-head-sub">
+          <h1 className="doc-title-sub">平面図</h1>
+          <p className="doc-sub-meta">
+            {project.name}　／　敷地 {num(project.plan.site.width)}m × {num(project.plan.site.depth)}m（道路は図の下側）
+          </p>
+        </header>
+        <div className="doc-plan">
+          <StaticPlan plan={project.plan} idp="print-" />
+        </div>
+        <p className="doc-caption">この図は打ち合わせ用の概略図です。実際の寸法は現地での実測によります。</p>
+      </article>
 
       {perspective && (
         <article className="paper">

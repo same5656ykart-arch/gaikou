@@ -600,6 +600,8 @@ select.input {
   inset: 0;
   z-index: 50;
   display: grid;
+  /* 中身が広くても、列を画面の幅より広げない */
+  grid-template-columns: minmax(0, 1fr);
   place-items: center;
   padding: 16px;
   background: rgba(12, 24, 36, 0.5);
@@ -1158,150 +1160,6 @@ select.input {
   margin-left: auto;
 }
 
-/* 敷地のサイズ */
-.size-step {
-  display: grid;
-  gap: 18px;
-}
-
-.size-figure {
-  padding: 10px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  background: var(--surface);
-}
-
-.size-diagram {
-  display: block;
-  width: 100%;
-  max-width: 420px;
-  max-height: 46dvh;
-  margin: 0 auto;
-}
-
-.size-area {
-  text-align: center;
-  color: var(--muted);
-  font-size: 0.88rem;
-  margin-top: 4px;
-}
-
-.size-area strong {
-  color: var(--ink);
-  font-size: 1.05rem;
-}
-
-.size-fields {
-  display: flex;
-  flex-direction: column;
-  gap: 22px;
-  min-width: 0;
-}
-
-.size-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 16px 12px;
-}
-
-@media (max-width: 420px) {
-  .size-grid {
-    grid-template-columns: minmax(0, 1fr);
-  }
-}
-
-@media (min-width: 860px) {
-  .size-step {
-    grid-template-columns: minmax(0, 5fr) minmax(0, 6fr);
-    align-items: start;
-  }
-
-  .size-figure {
-    position: sticky;
-    top: 12px;
-  }
-
-  .size-diagram {
-    max-height: 60dvh;
-  }
-}
-
-.dg-road {
-  fill: #d5d9dd;
-}
-
-.dg-road-label {
-  fill: #6b7783;
-  font-size: 12px;
-  font-weight: 700;
-}
-
-.dg-site {
-  fill: #f7f3e8;
-  stroke: var(--navy);
-  stroke-width: 2;
-  stroke-dasharray: 8 3 2 3;
-}
-
-.dg-house {
-  fill: #fff;
-  stroke: var(--ink);
-  stroke-width: 2;
-}
-
-.dg-house-label {
-  fill: var(--line-strong);
-  font-size: 12px;
-  font-weight: 700;
-}
-
-.dim-line {
-  fill: none;
-  stroke: var(--line-strong);
-  stroke-width: 1.5;
-}
-
-.dim-line.is-set {
-  stroke: var(--navy-2);
-}
-
-.dim-line.is-active {
-  stroke: var(--accent);
-  stroke-width: 2.5;
-}
-
-.dim-pill {
-  fill: #fff;
-  stroke: var(--line-strong);
-  stroke-width: 1.5;
-}
-
-.dim.is-set .dim-pill {
-  stroke: var(--navy-2);
-}
-
-.dim.is-active .dim-pill {
-  fill: var(--accent);
-  stroke: var(--accent);
-}
-
-.dim-mark {
-  fill: var(--accent);
-  font-size: 12px;
-  font-weight: 700;
-}
-
-.dim-val {
-  fill: var(--ink);
-  font-size: 12px;
-  font-weight: 700;
-}
-
-.dim.is-active .dim-mark,
-.dim.is-active .dim-val {
-  fill: #fff;
-}
-
 /* 写真 */
 .photo-grid {
   display: grid;
@@ -1500,6 +1358,213 @@ select.input {
   color: var(--warn);
   font-weight: 700;
   white-space: nowrap;
+}
+
+/* ---------- 既存図（現調のステップ。図＋パネルで画面いっぱいに使う） ---------- */
+
+.survey-fill {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+}
+
+.plan-existing .plan-panel {
+  max-height: 48%;
+}
+
+.existing-panel .h1 {
+  font-size: 1.2rem;
+}
+
+.existing-panel .lead {
+  font-size: 0.86rem;
+}
+
+@media (min-width: 900px) {
+  .plan-existing .plan-panel {
+    width: 420px;
+    max-height: none;
+  }
+}
+
+.existing-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.ex-sec {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+
+.ex-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 1rem;
+  font-weight: 700;
+}
+
+.ex-house-props .choice-dense {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.choice-dense {
+  gap: 6px;
+}
+
+.choice-dense .choice-btn {
+  min-height: 42px;
+  padding: 4px 8px;
+  justify-content: center;
+}
+
+.choice-dense .choice-mark {
+  display: none;
+}
+
+.choice-dense .choice-label {
+  font-size: 0.88rem;
+}
+
+/* パターン：横に並べてスクロール */
+.patterns {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding: 2px 2px 8px;
+  scroll-snap-type: x proximity;
+}
+
+.pattern {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  flex: none;
+  width: 108px;
+  padding: 8px 6px;
+  border: 1.5px solid var(--line-strong);
+  border-radius: var(--radius);
+  background: var(--surface);
+  text-align: center;
+  scroll-snap-align: start;
+}
+
+.pattern:hover {
+  border-color: var(--ink);
+}
+
+.pattern.is-on {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+.pattern-thumb {
+  width: 64px;
+  height: 64px;
+}
+
+.pattern-name {
+  font-weight: 700;
+  font-size: 0.84rem;
+  line-height: 1.3;
+  margin-top: 2px;
+}
+
+.pattern-desc {
+  color: var(--muted);
+  font-size: 0.68rem;
+  line-height: 1.35;
+}
+
+/* 境界にあるもの：辺ごとに 1 行 */
+.side-row {
+  display: grid;
+  grid-template-columns: 3.6em minmax(0, 1fr);
+  align-items: center;
+  gap: 4px 8px;
+  padding: 8px 0;
+  border-top: 1px solid var(--line);
+}
+
+.side-name {
+  font-weight: 700;
+  font-size: 0.9rem;
+}
+
+.side-opts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.chip-sm {
+  min-height: 36px;
+  padding: 2px 11px;
+  font-size: 0.82rem;
+}
+
+.side-remove {
+  grid-column: 2;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+  color: var(--danger);
+  font-weight: 700;
+  font-size: 0.86rem;
+  cursor: pointer;
+}
+
+.side-remove input {
+  width: 20px;
+  height: 20px;
+  accent-color: var(--danger);
+}
+
+.quick-add {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.quick-add .chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* 図の上のつまみと寸法 */
+.site-handle {
+  fill: var(--accent);
+  stroke: #fff;
+}
+
+.dim-guide {
+  fill: none;
+  stroke: var(--navy-2);
+  stroke-dasharray: 4 3;
+}
+
+.size-tag.size-tag-guide rect {
+  fill: #fff;
+  stroke: var(--navy-2);
+  /* 図の単位は m なので、線の太さは画面のピクセルで固定する */
+  stroke-width: 1.5px;
+  vector-effect: non-scaling-stroke;
+}
+
+.size-tag.size-tag-guide text {
+  fill: var(--navy);
+}
+
+.plan-label.is-remove,
+.plan-len.is-remove {
+  fill: var(--danger);
 }
 
 /* ---------- 平面図 ---------- */

@@ -1,16 +1,18 @@
 import { useCallback, useEffect, useId, useMemo, useReducer, useRef, useState } from 'react';
 import type { PointerEvent as ReactPointerEvent } from 'react';
 import type { Plan, PlanItem, Project, Tab } from '../types';
-import { CATALOG, PALETTE_GROUPS, catalogOf, createItem, hasKind, lineLength, unitPrice, variantOf } from '../lib/catalog';
+import { CATALOG, PALETTE_GROUPS, catalogOf, createItem, hasKind, isBaseItem, lineLength, unitPrice, variantOf } from '../lib/catalog';
 import { buildEstimate } from '../lib/estimate';
 import { clamp, meters, num, r2, uid, yen } from '../lib/format';
-import { canGenerate, emptyPlan, generatePlan } from '../lib/planFromSurvey';
+import { hasProposal, houseOf, resizeSite } from '../lib/existing';
+import { generatePlan } from '../lib/planFromSurvey';
 import { confirmDialog, toast, updateProject, useAppState } from '../store';
 import { Icon } from '../ui/Icon';
 import { Sheet } from '../ui/Overlays';
 import { NumField } from '../ui/fields';
-import { PlanDrawing, planBounds, pointSize } from './PlanDrawing';
-import { itemCost, moveEndpoint, moveItem, resizeRect, setLineLength, snapCandidates } from './geometry';
+import { ExistingPanel } from './ExistingPanel';
+import { HouseDims, PlanDrawing, SizeTag, planBounds, pointSize } from './PlanDrawing';
+import { GRID, itemCost, moveEndpoint, moveItem, resizeRect, setLineLength, snapCandidates } from './geometry';
 import type { Cands } from './geometry';
 
 interface Props {
@@ -19,46 +21,7 @@ interface Props {
 }
 
 export function PlanScreen({ project, onGo }: Props) {
-  const a = project.survey.answers;
-  if (!project.plan) {
-    const ready = canGenerate(a);
-    return (
-      <div className="plan-empty">
-        <div className="empty">
-          <h2 className="h1">平面図はまだありません</h2>
-          <p>
-            {ready
-              ? '現調で測った数字とご要望から、たたき台を自動で作れます。'
-              : '現調の「敷地のサイズ」で幅と奥行を入力すると、平面図を自動で作れます。'}
-          </p>
-          <div className="empty-actions">
-            {ready ? (
-              <button
-                type="button"
-                className="btn btn-primary btn-lg"
-                onClick={() => {
-                  updateProject(project.id, (p) => ({ ...p, plan: generatePlan(p.survey.answers) }));
-                  toast('平面図を自動で作成しました');
-                }}
-              >
-                <Icon name="magic" size={18} />
-                現調から自動作成
-              </button>
-            ) : (
-              <button type="button" className="btn btn-primary btn-lg" onClick={() => onGo('survey')}>
-                現調へ進む
-                <Icon name="next" size={18} />
-              </button>
-            )}
-            <button type="button" className="btn btn-lg" onClick={() => updateProject(project.id, (p) => ({ ...p, plan: emptyPlan(p.survey.answers) }))}>
-              白紙からかく
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  }
-  return <PlanEditor project={project} initial={project.plan} onGo={onGo} />;
+  return <PlanEditor project={project} mode="plan" onGo={onGo} />;
 }
 
 // ---------------------------------------------------------------------------
@@ -75,24 +38,39 @@ type Drag =
   | { mode: 'move'; pid: number; sx: number; sy: number; wx: number; wy: number; orig: PlanItem; cands: Cands; moved: boolean }
   | { mode: 'resize'; pid: number; handle: string; ox: number; oy: number; orig: PlanItem; cands: Cands; moved: boolean }
   | { mode: 'end'; pid: number; which: 1 | 2; ox: number; oy: number; orig: PlanItem; cands: Cands; moved: boolean }
+  | { mode: 'site'; pid: number; handle: string; ox: number; oy: number; orig: Plan; moved: boolean }
   | { mode: 'pinch'; d0: number; view: View; wx: number; wy: number };
 
 const MIN_MPP = 0.004;
 const MAX_MPP = 0.25;
 
+/** 図全体が入る表示にする。せまい画面では、左上の道具箱に図が隠れないよう上を空ける */
 function fitView(plan: Plan, w: number, h: number): View {
   const b = planBounds(plan);
+  const top = w < 700 ? 52 : 0;
+  const mpp = clamp(Math.max(b.w / Math.max(w, 1), b.h / Math.max(h - top, 1)) * 1.03, MIN_MPP, MAX_MPP);
   return {
     cx: b.x + b.w / 2,
-    cy: -(b.y + b.h / 2),
-    mpp: clamp(Math.max(b.w / Math.max(w, 1), b.h / Math.max(h, 1)) * 1.03, MIN_MPP, MAX_MPP),
+    cy: -(b.y + b.h / 2) + (top / 2) * mpp,
+    mpp,
   };
 }
 
-function PlanEditor({ project, initial, onGo }: Props & { initial: Plan }) {
+interface EditorProps extends Props {
+  /**
+   * existing：現調の「既存図」。敷地・建物・いまあるものだけを描く。
+   * plan：平面図。既存図の上に、これから作る部材を置く。
+   */
+  mode: 'existing' | 'plan';
+  /** 既存図のパネルの上に出す「ステップ 2 / 8」など */
+  stepLabel?: string;
+}
+
+export function PlanEditor({ project, mode, onGo, stepLabel }: EditorProps) {
   const settings = useAppState((s) => s.settings);
   const idp = useId().replace(/[^a-zA-Z0-9]/g, '') + '-';
-  const [plan, setPlanState] = useState<Plan>(initial);
+  const existing = mode === 'existing';
+  const [plan, setPlanState] = useState<Plan>(project.plan);
   const draft = useRef(plan); // 画面に出ている最新（ドラッグ中の仮の状態を含む）
   const committed = useRef(plan); // 最後に確定した状態
   const past = useRef<Plan[]>([]);
@@ -133,9 +111,13 @@ function PlanEditor({ project, initial, onGo }: Props & { initial: Plan }) {
       committed.current = next;
       draft.current = next;
       setPlanState(next);
-      updateProject(project.id, (p) => ({ ...p, plan: next }));
+      updateProject(project.id, (p) => ({
+        ...p,
+        plan: next,
+        survey: existing && p.survey.answers.siteChecked !== 'yes' ? { ...p.survey, answers: { ...p.survey.answers, siteChecked: 'yes' } } : p.survey,
+      }));
     },
-    [project.id],
+    [project.id, existing],
   );
 
   const restore = (next: Plan) => {
@@ -241,7 +223,10 @@ function PlanEditor({ project, initial, onGo }: Props & { initial: Plan }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const selected = selectedId ? (plan.items.find((it) => it.id === selectedId && hasKind(it.kind)) ?? null) : null;
+  // 既存図では、これから作る部材は出さない（敷地・建物・いまあるものだけ）
+  const shown = useMemo(() => (existing ? { ...plan, items: plan.items.filter(isBaseItem) } : plan), [plan, existing]);
+  const visible = (p: Plan): Plan => (existing ? { ...p, items: p.items.filter(isBaseItem) } : p);
+  const selected = selectedId ? (shown.items.find((it) => it.id === selectedId && hasKind(it.kind)) ?? null) : null;
   selectedRef.current = selectedId;
   useEffect(() => {
     ensureVisible();
@@ -329,7 +314,7 @@ function PlanEditor({ project, initial, onGo }: Props & { initial: Plan }) {
     if (startPinchIfNeeded()) return;
     setSelectedId(it.id);
     const [wx, wy] = toWorld(e.clientX, e.clientY);
-    drag.current = { mode: 'move', pid: e.pointerId, sx: e.clientX, sy: e.clientY, wx, wy, orig: it, cands: snapCandidates(draft.current, it.id), moved: false };
+    drag.current = { mode: 'move', pid: e.pointerId, sx: e.clientX, sy: e.clientY, wx, wy, orig: it, cands: snapCandidates(visible(draft.current), it.id), moved: false };
   };
 
   const onHandleDown = (e: ReactPointerEvent, it: PlanItem, handle: string, hx: number, hy: number) => {
@@ -338,8 +323,17 @@ function PlanEditor({ project, initial, onGo }: Props & { initial: Plan }) {
     capture(e);
     if (startPinchIfNeeded()) return;
     const [wx, wy] = toWorld(e.clientX, e.clientY);
-    const base = { pid: e.pointerId, ox: hx - wx, oy: hy - wy, orig: it, cands: snapCandidates(draft.current, it.id), moved: false };
+    const base = { pid: e.pointerId, ox: hx - wx, oy: hy - wy, orig: it, cands: snapCandidates(visible(draft.current), it.id), moved: false };
     drag.current = handle === 'p1' || handle === 'p2' ? { mode: 'end', which: handle === 'p1' ? 1 : 2, ...base } : { mode: 'resize', handle, ...base };
+  };
+
+  const onSiteHandleDown = (e: ReactPointerEvent, handle: string, hx: number, hy: number) => {
+    if (!viewRef.current) return;
+    e.stopPropagation();
+    capture(e);
+    if (startPinchIfNeeded()) return;
+    const [wx, wy] = toWorld(e.clientX, e.clientY);
+    drag.current = { mode: 'site', pid: e.pointerId, handle, ox: hx - wx, oy: hy - wy, orig: draft.current, moved: false };
   };
 
   const onMove = (e: ReactPointerEvent) => {
@@ -366,6 +360,14 @@ function PlanEditor({ project, initial, onGo }: Props & { initial: Plan }) {
       return;
     }
     const [wx, wy] = toWorld(e.clientX, e.clientY);
+    if (d.mode === 'site') {
+      const snap = (v: number) => Math.round(v / GRID) * GRID;
+      const W = d.handle.includes('e') ? snap(wx + d.ox) : d.orig.site.width;
+      const D = d.handle.includes('n') ? snap(wy + d.oy) : d.orig.site.depth;
+      d.moved = true;
+      preview(resizeSite(d.orig, W, D));
+      return;
+    }
     let next: PlanItem;
     if (d.mode === 'move') {
       if (!d.moved && Math.hypot(e.clientX - d.sx, e.clientY - d.sy) < 4) return;
@@ -436,37 +438,40 @@ function PlanEditor({ project, initial, onGo }: Props & { initial: Plan }) {
 
   const estimate = useMemo(() => buildEstimate(plan, project.survey.answers, project.estimate, settings), [plan, project.survey.answers, project.estimate, settings]);
 
+  /** ご要望から、これから作る部材を自動で置く。既存図（建物・いまあるもの）はそのまま */
   const regenerate = async () => {
     setMenu(false);
-    if (!canGenerate(project.survey.answers)) {
-      toast('現調の「敷地のサイズ」で幅と奥行を入力してください');
-      return;
+    if (hasProposal(draft.current)) {
+      const ok = await confirmDialog({
+        title: 'ご要望から作り直しますか？',
+        body: '追加した部材を消して、現調のご要望から置き直します。建物と既存のものはそのまま残ります。「元に戻す」で取り消せます。',
+        okLabel: '作り直す',
+      });
+      if (!ok) return;
     }
-    const ok = await confirmDialog({
-      title: '現調から作り直しますか？',
-      body: 'いまの平面図を消して、現調の内容から新しく作ります。「元に戻す」で取り消せます。',
-      okLabel: '作り直す',
-    });
-    if (!ok) return;
-    const next = generatePlan(project.survey.answers);
+    const next = generatePlan(draft.current, project.survey.answers);
     commit(next);
     setSelectedId(null);
     setView(fitView(next, size.w, size.h));
+    toast(hasProposal(next) ? 'ご要望から自動で配置しました' : '現調の「ご要望」でやりたい工事を選ぶと、自動で配置できます');
   };
 
   const clearAll = async () => {
     setMenu(false);
-    const ok = await confirmDialog({ title: '部材をすべて消しますか？', body: '建物も含めて、置いた部材をすべて消します。「元に戻す」で取り消せます。', okLabel: 'すべて消す', danger: true });
+    const ok = await confirmDialog({ title: '追加した部材をすべて消しますか？', body: '建物と既存のものは残して、追加した部材をすべて消します。「元に戻す」で取り消せます。', okLabel: 'すべて消す', danger: true });
     if (!ok) return;
-    commit({ ...draft.current, items: [] });
+    commit({ ...draft.current, items: draft.current.items.filter(isBaseItem) });
     setSelectedId(null);
   };
 
   const mpp = view?.mpp ?? 0.02;
   const viewBox = view ? `${view.cx - (size.w * mpp) / 2} ${-view.cy - (size.h * mpp) / 2} ${size.w * mpp} ${size.h * mpp}` : '0 0 1 1';
 
+  const house = existing ? houseOf(shown) : undefined;
+  const proposalCount = plan.items.filter((it) => hasKind(it.kind) && !isBaseItem(it)).length;
+
   return (
-    <div className="plan">
+    <div className={'plan' + (existing ? ' plan-existing' : '')}>
       <div className="plan-canvas" ref={wrapRef}>
         <svg
           ref={svgRef}
@@ -477,12 +482,14 @@ function PlanEditor({ project, initial, onGo }: Props & { initial: Plan }) {
           onPointerUp={onUp}
           onPointerCancel={onUp}
           role="application"
-          aria-label="平面図。部材をタップして選び、ドラッグで動かします"
+          aria-label={existing ? '既存図。建物や敷地の端をドラッグして大きさを合わせます' : '平面図。部材をタップして選び、ドラッグで動かします'}
         >
           {view && (
             <>
-              <PlanDrawing plan={plan} mpp={mpp} idp={idp} onItemDown={onItemDown} />
+              <PlanDrawing plan={shown} mpp={mpp} idp={idp} onItemDown={onItemDown} />
+              {house && <HouseDims house={house} mpp={mpp} showSize={selected?.id !== house.id} />}
               {selected && <Selection it={selected} mpp={mpp} onHandleDown={onHandleDown} />}
+              {existing && !selected && <SiteHandles plan={shown} mpp={mpp} onDown={onSiteHandleDown} />}
             </>
           )}
         </svg>
@@ -504,46 +511,53 @@ function PlanEditor({ project, initial, onGo }: Props & { initial: Plan }) {
           <button type="button" className="tool" onClick={fit} aria-label="全体を表示" title="全体を表示">
             <Icon name="fit" />
           </button>
-          <span className="tool-sep" />
-          <div className="tool-menu">
-            <button type="button" className="tool" onClick={() => setMenu((m) => !m)} aria-label="そのほかの操作" aria-expanded={menu} title="そのほかの操作">
-              <Icon name="list" />
-            </button>
-            {menu && (
-              <div className="menu" role="menu">
-                <button type="button" role="menuitem" onClick={() => void regenerate()}>
-                  <Icon name="magic" size={18} />
-                  現調から作り直す
+          {!existing && (
+            <>
+              <span className="tool-sep" />
+              <div className="tool-menu">
+                <button type="button" className="tool" onClick={() => setMenu((m) => !m)} aria-label="そのほかの操作" aria-expanded={menu} title="そのほかの操作">
+                  <Icon name="list" />
                 </button>
-                <button
-                  type="button"
-                  role="menuitem"
-                  onClick={() => {
-                    setMenu(false);
-                    setSiteSheet(true);
-                  }}
-                >
-                  <Icon name="plan" size={18} />
-                  敷地のサイズを変える
-                </button>
-                <button type="button" role="menuitem" className="danger" onClick={() => void clearAll()}>
-                  <Icon name="trash" size={18} />
-                  部材をすべて消す
-                </button>
+                {menu && (
+                  <div className="menu" role="menu">
+                    <button type="button" role="menuitem" onClick={() => void regenerate()}>
+                      <Icon name="magic" size={18} />
+                      ご要望から作り直す
+                    </button>
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={() => {
+                        setMenu(false);
+                        setSiteSheet(true);
+                      }}
+                    >
+                      <Icon name="plan" size={18} />
+                      敷地のサイズを変える
+                    </button>
+                    <button type="button" role="menuitem" className="danger" onClick={() => void clearAll()}>
+                      <Icon name="trash" size={18} />
+                      追加した部材をすべて消す
+                    </button>
+                  </div>
+                )}
               </div>
-            )}
-          </div>
+            </>
+          )}
         </div>
 
-        <button type="button" className="plan-total" onClick={() => onGo('estimate')} title="見積もりを開く">
-          <span className="plan-total-label">概算（税込）</span>
-          <span className="plan-total-value">{yen(estimate.total)}</span>
-        </button>
-
-        <button type="button" className="fab" onClick={() => setPalette(true)}>
-          <Icon name="plus" size={22} />
-          部材を追加
-        </button>
+        {!existing && (
+          <>
+            <button type="button" className="plan-total" onClick={() => onGo('estimate')} title="見積もりを開く">
+              <span className="plan-total-label">概算（税込）</span>
+              <span className="plan-total-value">{yen(estimate.total)}</span>
+            </button>
+            <button type="button" className="fab" onClick={() => setPalette(true)}>
+              <Icon name="plus" size={22} />
+              部材を追加
+            </button>
+          </>
+        )}
       </div>
 
       <div className="plan-panel">
@@ -558,23 +572,47 @@ function PlanEditor({ project, initial, onGo }: Props & { initial: Plan }) {
             onReorder={(dir) => reorder(selected, dir)}
             onClose={() => setSelectedId(null)}
           />
+        ) : existing ? (
+          <ExistingPanel
+            project={project}
+            plan={plan}
+            stepLabel={stepLabel}
+            commit={commit}
+            onSelect={setSelectedId}
+            onFit={(next) => setView(fitView(next, size.w, size.h))}
+          />
         ) : (
           <div className="panel-idle">
-            <p className="panel-hint">
-              {plan.items.length === 0 ? '「部材を追加」から、建物や駐車場を置いていきます。' : '部材をタップして選ぶ。ドラッグで移動、角の丸をドラッグで大きさを変えられます。'}
-            </p>
-            <div className="panel-idle-actions">
-              <button type="button" className="btn" onClick={() => setSiteSheet(true)}>
-                敷地 {num(plan.site.width)}×{meters(plan.site.depth)}
-              </button>
-              <button type="button" className="btn btn-primary" onClick={() => onGo('view3d')}>
-                3Dで見る
-                <Icon name="next" size={18} />
-              </button>
-            </div>
+            {proposalCount === 0 ? (
+              <>
+                <p className="panel-hint">既存図ができています。現調のご要望から自動で配置するか、「部材を追加」で1つずつ置いていきます。</p>
+                <div className="panel-idle-actions">
+                  <button type="button" className="btn btn-primary" onClick={() => void regenerate()}>
+                    <Icon name="magic" size={18} />
+                    ご要望から自動で配置
+                  </button>
+                  <button type="button" className="btn" onClick={() => onGo('survey')}>
+                    現調を見る
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <p className="panel-hint">部材をタップして選ぶ。ドラッグで移動、角の丸をドラッグで大きさを変えられます。</p>
+                <div className="panel-idle-actions">
+                  <button type="button" className="btn" onClick={() => setSiteSheet(true)}>
+                    敷地 {num(plan.site.width)}×{meters(plan.site.depth)}
+                  </button>
+                  <button type="button" className="btn btn-primary" onClick={() => onGo('view3d')}>
+                    3Dで見る
+                    <Icon name="next" size={18} />
+                  </button>
+                </div>
+              </>
+            )}
             {plan.items.length > 0 && (
               <div className="item-list">
-                <h3 className="palette-group">置いた部材（{plan.items.length}点）</h3>
+                <h3 className="palette-group">置いてあるもの（{plan.items.length}点）</h3>
                 <ul>
                   {plan.items
                     .filter((it) => hasKind(it.kind))
@@ -587,7 +625,7 @@ function PlanEditor({ project, initial, onGo }: Props & { initial: Plan }) {
                             <span className="swatch" style={{ background: c.fill.startsWith('rgba') ? '#9cc3de' : c.fill, borderColor: c.stroke }} aria-hidden="true" />
                             <span className="item-row-name">
                               {c.name}
-                              <span className="item-row-sub">{cost ? `${num(cost.qty)}${cost.unit}` : '目安'}</span>
+                              <span className="item-row-sub">{cost ? `${num(cost.qty)}${cost.unit}` : it.kind === 'house' ? '既存の建物' : c.group === 'existing' ? (c.qty !== 'none' ? '残す' : '位置の記録') : '目安'}</span>
                             </span>
                             <span className="item-row-cost">{cost ? yen(cost.amount + (cost.base?.amount ?? 0)) : '—'}</span>
                           </button>
@@ -607,11 +645,11 @@ function PlanEditor({ project, initial, onGo }: Props & { initial: Plan }) {
         <Sheet title="敷地のサイズ" onClose={() => setSiteSheet(false)}>
           <div className="stack">
             <div className="row-2">
-              <NumField id="site-w" label="幅（間口）" unit="m" step={0.1} min={2} max={80} allowEmpty={false} stepper value={plan.site.width} onChange={(v) => v !== undefined && commit({ ...draft.current, site: { ...draft.current.site, width: v } }, 'site-w')} />
-              <NumField id="site-d" label="奥行" unit="m" step={0.1} min={2} max={80} allowEmpty={false} stepper value={plan.site.depth} onChange={(v) => v !== undefined && commit({ ...draft.current, site: { ...draft.current.site, depth: v } }, 'site-d')} />
+              <NumField id="site-w" label="幅（間口）" unit="m" step={0.1} min={2} max={80} allowEmpty={false} stepper value={plan.site.width} onChange={(v) => v !== undefined && commit(resizeSite(draft.current, v, draft.current.site.depth), 'site-w')} />
+              <NumField id="site-d" label="奥行" unit="m" step={0.1} min={2} max={80} allowEmpty={false} stepper value={plan.site.depth} onChange={(v) => v !== undefined && commit(resizeSite(draft.current, draft.current.site.width, v), 'site-d')} />
             </div>
             <NumField id="site-road" label="前の道路の幅" unit="m" step={0.5} min={2} max={20} allowEmpty={false} stepper value={plan.roadWidth} onChange={(v) => v !== undefined && commit({ ...draft.current, roadWidth: v }, 'site-road')} />
-            <p className="field-hint">道路は図の下側です。サイズを変えても、置いた部材の位置は変わりません。</p>
+            <p className="field-hint">道路は図の下側です。境界に沿った塀・フェンスは、敷地といっしょに伸び縮みします。</p>
             <button
               type="button"
               className="btn btn-primary btn-lg"
@@ -626,6 +664,31 @@ function PlanEditor({ project, initial, onGo }: Props & { initial: Plan }) {
         </Sheet>
       )}
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// 既存図：敷地の端をつかむハンドルと、建物までの距離
+
+function SiteHandles({ plan, mpp, onDown }: { plan: Plan; mpp: number; onDown: (e: ReactPointerEvent, handle: string, hx: number, hy: number) => void }) {
+  const W = plan.site.width;
+  const D = plan.site.depth;
+  const r = 8 * mpp;
+  const hit = 19 * mpp;
+  const hs: [string, number, number][] = [
+    ['e', W, D / 2],
+    ['n', W / 2, D],
+    ['ne', W, D],
+  ];
+  return (
+    <g className="site-handles">
+      {hs.map(([k, x, y]) => (
+        <g key={k} className="handle" onPointerDown={(e) => onDown(e, k, x, y)}>
+          <circle cx={x} cy={-y} r={hit} fill="transparent" />
+          <rect className="site-handle" x={x - r} y={-y - r} width={r * 2} height={r * 2} rx={r * 0.35} strokeWidth={2} vectorEffect="non-scaling-stroke" />
+        </g>
+      ))}
+    </g>
   );
 }
 
@@ -679,19 +742,6 @@ function Selection({ it, mpp, onHandleDown }: { it: PlanItem; mpp: number; onHan
   return (
     <g className="selection">
       <rect className="sel-box" x={it.x - w / 2 - pad} y={-it.y - d / 2 - pad} width={w + pad * 2} height={d + pad * 2} rx={pad} strokeWidth={2} vectorEffect="non-scaling-stroke" />
-    </g>
-  );
-}
-
-function SizeTag({ x, y, text, fs, vertical }: { x: number; y: number; text: string; fs: number; vertical?: boolean }) {
-  const w = (text.length * 0.62 + 0.9) * fs;
-  const h = fs * 1.7;
-  return (
-    <g className="size-tag" transform={`translate(${x} ${y})${vertical ? ' rotate(-90)' : ''}`} pointerEvents="none">
-      <rect x={-w / 2} y={-h / 2} width={w} height={h} rx={h / 2} />
-      <text y={fs * 0.36} fontSize={fs} textAnchor="middle">
-        {text}
-      </text>
     </g>
   );
 }
@@ -757,13 +807,13 @@ function ItemPanel({ it, prices, onPatch, onDelete, onDuplicate, onReorder, onCl
       {c.variants.length > 1 && (
         <div className="field field-compact">
           <label className="field-label" htmlFor="it-variant">
-            種類
+            {c.group === 'existing' && c.qty !== 'none' ? '工事での扱い' : '種類'}
           </label>
           <select id="it-variant" className="input" value={it.variant} onChange={(e) => changeVariant(e.target.value)}>
             {c.variants.map((v) => (
               <option key={v.key} value={v.key}>
                 {v.name}
-                {c.qty !== 'none' ? `　${yen(unitPrice(prices, c.key, v.key))}/${c.unit}` : ''}
+                {c.qty !== 'none' && !v.skip ? `　${yen(unitPrice(prices, c.key, v.key))}/${c.unit}` : ''}
               </option>
             ))}
           </select>
@@ -780,12 +830,12 @@ function ItemPanel({ it, prices, onPatch, onDelete, onDuplicate, onReorder, onCl
       {c.shape === 'line' && (
         <div className="row-2">
           <NumField id="it-len" compact label="長さ" unit="m" step={0.1} min={0.2} max={120} allowEmpty={false} stepper value={r2(lineLength(it))} onChange={(v) => v !== undefined && onPatch((x) => setLineLength(x, v), 'len')} />
-          {it.kind === 'block' && (
+          {(it.kind === 'block' || it.kind === 'exBlock') && (
             <div className="field field-compact">
               <label className="field-label" htmlFor="it-rows">
                 高さ
               </label>
-              <select id="it-rows" className="input" value={Number(it.props.rows ?? 3)} onChange={(e) => setProp('rows', Number(e.target.value))}>
+              <select id="it-rows" className="input" value={Number(it.props.rows ?? (it.kind === 'exBlock' ? 5 : 3))} onChange={(e) => setProp('rows', Number(e.target.value))}>
                 {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((n) => (
                   <option key={n} value={n}>
                     {n}段（{(n * 0.2).toFixed(1)}m）
@@ -794,13 +844,13 @@ function ItemPanel({ it, prices, onPatch, onDelete, onDuplicate, onReorder, onCl
               </select>
             </div>
           )}
-          {it.kind === 'fence' && (
+          {(it.kind === 'fence' || it.kind === 'exFence') && (
             <div className="field field-compact">
               <label className="field-label" htmlFor="it-base">
                 下のブロック
               </label>
               <select id="it-base" className="input" value={Number(it.props.baseRows ?? 0)} onChange={(e) => setProp('baseRows', Number(e.target.value))}>
-                <option value={0}>なし（既存の上など）</option>
+                <option value={0}>{it.kind === 'exFence' ? 'なし' : 'なし（既存の上など）'}</option>
                 {[1, 2, 3, 4, 5].map((n) => (
                   <option key={n} value={n}>
                     {n}段（{(n * 0.2).toFixed(1)}m）
@@ -879,7 +929,15 @@ function ItemPanel({ it, prices, onPatch, onDelete, onDuplicate, onReorder, onCl
           {c.includes && <p className="cost-includes">含まれるもの：{c.includes}</p>}
         </div>
       ) : (
-        <p className="cost-includes">{it.kind === 'house' ? '建物は見積もりに入りません。位置と大きさの目安です。' : '大きさの目安です。見積もりには入りません。'}</p>
+        <p className="cost-includes">
+          {it.kind === 'house'
+            ? '建物は見積もりに入りません。位置と大きさを合わせてください。'
+            : c.group === 'existing' && c.qty !== 'none'
+              ? 'そのまま残すので、費用はかかりません。撤去するときは「工事での扱い」を変えてください。'
+              : c.group === 'existing'
+                ? '位置の記録です。見積もりには入りません。'
+                : '大きさの目安です。見積もりには入りません。'}
+        </p>
       )}
 
       <div className="panel-actions">

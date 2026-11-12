@@ -1,8 +1,10 @@
 import type { Answers, Plan, PlanItem } from '../types';
-import { catalogOf, createItem } from './catalog';
+import { catalogOf, createItem, isBaseItem } from './catalog';
+import { boundaryState } from './existing';
+import type { Side } from './existing';
 import { clamp, r2 } from './format';
 
-// 現調の回答（敷地・建物のサイズとご要望）から、平面図のたたき台を自動で作る。
+// 既存図（敷地・建物・いまあるもの）と現調のご要望から、平面図のたたき台を自動で作る。
 // 道路は図の下（y = 0）。あくまで出発点で、あとは平面図の画面で動かして調整する。
 
 interface R {
@@ -42,32 +44,26 @@ function line(kind: string, variant: string | undefined, x: number, y: number, x
   return { ...it, x: r2(x), y: r2(y), x2: r2(x2), y2: r2(y2), props: { ...it.props, ...props } };
 }
 
-/** 敷地の幅と奥行が入っていれば自動作成できる */
-export function canGenerate(a: Answers): boolean {
-  return numOr(a.siteWidth, 0) >= 2 && numOr(a.siteDepth, 0) >= 2;
-}
-
-export function emptyPlan(a: Answers): Plan {
-  return {
-    site: { width: clamp(numOr(a.siteWidth, 10), 2, 80), depth: clamp(numOr(a.siteDepth, 15), 2, 80) },
-    roadWidth: clamp(numOr(a.roadWidth, 6), 2, 20),
-    items: [],
-  };
-}
-
-export function generatePlan(a: Answers): Plan {
-  const plan = emptyPlan(a);
-  const W = plan.site.width;
-  const D = plan.site.depth;
+/**
+ * 既存図はそのまま残し、その上に「これから作るもの」を置く。
+ * すでに置いてあった提案の部材は捨てて、作り直す。
+ */
+export function generatePlan(base: Plan, a: Answers): Plan {
+  const W = base.site.width;
+  const D = base.site.depth;
   const wants = new Set(Array.isArray(a.wants) ? a.wants : []);
+  const kept = base.items.filter(isBaseItem);
 
-  // ---- 建物 ----
-  const hw = clamp(numOr(a.houseWidth, r1(W * 0.65)), 2, W);
-  const hd = clamp(numOr(a.houseDepth, r1(D * 0.45)), 2, D);
-  const hy = clamp(numOr(a.houseFront, r1(Math.min(6, (D - hd) * 0.7))), 0, D - hd);
-  const hx = clamp(numOr(a.houseLeft, r1((W - hw) / 2)), 0, W - hw);
+  // ---- 建物（既存図にあるものを使う。なければ敷地の奥に建物がないものとして扱う） ----
+  const houseItem = kept.find((it) => it.kind === 'house');
+  const hasHouse = houseItem !== undefined;
+  const hx = hasHouse ? clamp(houseItem.x, 0, W) : 0;
+  const hy = hasHouse ? clamp(houseItem.y, 0, D) : D;
+  const hw = hasHouse ? clamp(houseItem.w, 0, W - hx) : W;
+  const hd = hasHouse ? clamp(houseItem.h, 0, D - hy) : 0;
   const house: R = { x: hx, y: hy, w: hw, h: hd };
-  const door = a.houseDoor === 'left' || a.houseDoor === 'right' ? a.houseDoor : 'center';
+  const doorProp = houseItem?.props.door;
+  const door = doorProp === 'left' || doorProp === 'right' ? doorProp : 'center';
   const doorX = hx + hw * (door === 'left' ? 0.25 : door === 'right' ? 0.75 : 0.5);
   const leftGap = hx;
   const rightGap = W - hx - hw;
@@ -78,12 +74,6 @@ export function generatePlan(a: Answers): Plan {
   const structures: PlanItem[] = [];
   const lines: PlanItem[] = [];
   const points: PlanItem[] = [];
-
-  structures.push(
-    rect('house', 'std', house, {
-      props: { floors: clamp(numOr(a.houseFloors, 2), 1, 3), door },
-    }),
-  );
 
   // ---- 駐車場 ----
   const wantsParking = wants.has('parking') || wants.has('carport');
@@ -151,7 +141,7 @@ export function generatePlan(a: Answers): Plan {
   // ---- アプローチ ----
   const AW = 1.2;
   let approach: R | null = null;
-  if (wants.has('approach') && hy >= 0.8) {
+  if (wants.has('approach') && hasHouse && hy >= 0.8) {
     const ax = clamp(doorX - AW / 2, 0, W - AW);
     const hitsPark = park !== null && ax < park.x + park.w - 0.2 && ax + AW > park.x + 0.2;
     if (!hitsPark) approach = { x: ax, y: 0, w: AW, h: hy };
@@ -267,13 +257,23 @@ export function generatePlan(a: Answers): Plan {
   }
 
   // ---- フェンス ----
+  // 既存のフェンスを残す辺には付けない。既存のブロックを残す辺は、その上に付ける。
   if (wants.has('fence')) {
-    const sides = Array.isArray(a.fenceSides) && a.fenceSides.length > 0 ? a.fenceSides : ['left', 'right', 'back'];
+    const sides = (Array.isArray(a.fenceSides) && a.fenceSides.length > 0 ? a.fenceSides : ['left', 'right', 'back']) as Side[];
     const v = typeof a.fenceType === 'string' ? a.fenceType : 'mesh';
-    const props = { baseRows: a.existingBlock === 'keep' ? 0 : 2 };
-    if (sides.includes('left')) lines.push(line('fence', v, 0, 0, 0, D, props));
-    if (sides.includes('back')) lines.push(line('fence', v, 0, D, W, D, props));
-    if (sides.includes('right')) lines.push(line('fence', v, W, 0, W, D, props));
+    const span: Record<string, [number, number, number, number]> = {
+      left: [0, 0, 0, D],
+      back: [0, D, W, D],
+      right: [W, 0, W, D],
+    };
+    for (const side of ['left', 'back', 'right'] as const) {
+      if (!sides.includes(side)) continue;
+      const st = boundaryState(base, side);
+      const keptHere = st.type !== 'none' && !st.remove;
+      if (keptHere && st.type !== 'block') continue;
+      const [x, y, x2, y2] = span[side];
+      lines.push(line('fence', v, x, y, x2, y2, { baseRows: keptHere ? 0 : 2 }));
+    }
   }
 
   // ---- 物置・サイクルポート ----
@@ -310,6 +310,5 @@ export function generatePlan(a: Answers): Plan {
     if (tree) points.push(point('light', 'spot', tree.x + 0.45, tree.y + 0.45));
   }
 
-  plan.items = [...floor, ...cars, ...structures, ...lines, ...points];
-  return plan;
+  return { ...base, items: [...kept, ...floor, ...cars, ...structures, ...lines, ...points] };
 }

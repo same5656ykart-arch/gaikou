@@ -72,7 +72,7 @@ export default function View3D({ project, onGo }: Props) {
   // レンダラーとカメラは 1 回だけ作る
   useEffect(() => {
     const mount = mountRef.current;
-    if (!mount || !planRef.current) return;
+    if (!mount) return;
     let renderer: THREE.WebGLRenderer;
     try {
       renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
@@ -138,7 +138,7 @@ export default function View3D({ project, onGo }: Props) {
   // 平面図や表示の設定が変わったら、シーンを作り直す（カメラはそのまま）
   useEffect(() => {
     const st = stage.current;
-    if (!st || !plan) return;
+    if (!st) return;
     st.built?.dispose();
     st.built = buildScene(plan, { time, showCars });
     st.renderer.toneMappingExposure = time === 'night' ? 1.35 : 1.0;
@@ -147,7 +147,7 @@ export default function View3D({ project, onGo }: Props) {
 
   const setPreset = (p: Preset) => {
     const st = stage.current;
-    if (!st || !plan) return;
+    if (!st) return;
     const v = presetView(plan, p, st.camera.aspect);
     st.camera.position.copy(v.pos);
     st.controls.target.copy(v.target);
@@ -181,21 +181,6 @@ export default function View3D({ project, onGo }: Props) {
     }
     setSaving(false);
   };
-
-  if (!plan) {
-    return (
-      <div className="plan-empty">
-        <div className="empty">
-          <h2 className="h1">先に平面図を作りましょう</h2>
-          <p>3Dパースは平面図から自動で作られます。</p>
-          <button type="button" className="btn btn-primary btn-lg" onClick={() => onGo('plan')}>
-            平面図へ
-            <Icon name="next" size={18} />
-          </button>
-        </div>
-      </div>
-    );
-  }
 
   return (
     <div className="view3d">

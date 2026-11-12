@@ -1,12 +1,15 @@
 import { useState } from 'react';
 import type { Project } from '../types';
+import { hasKind, isBaseItem } from '../lib/catalog';
 import { estimateOf } from '../lib/estimate';
+import { PATTERNS, hasProposal } from '../lib/existing';
 import { yen } from '../lib/format';
 import { surveyProgress } from '../lib/surveyDef';
 import { addSampleProject, confirmDialog, createProject, deleteProject, duplicateProject, navigate, toast, updateProject, useAppState } from '../store';
 import { Icon } from '../ui/Icon';
 import { Sheet } from '../ui/Overlays';
 import { TextField } from '../ui/fields';
+import { PatternPicker } from '../plan/ExistingPanel';
 
 function dateLabel(ts: number): string {
   const d = new Date(ts);
@@ -14,8 +17,8 @@ function dateLabel(ts: number): string {
 }
 
 const FLOW = [
-  { icon: 'survey', title: '現地調査', text: '質問に答えて、測って、写真を撮る' },
-  { icon: 'plan', title: '平面図', text: '測った数字から自動で作成。指で動かして調整' },
+  { icon: 'survey', title: '現地調査', text: 'パターンを選んで既存図を描き、質問に答える' },
+  { icon: 'plan', title: '平面図', text: 'ご要望から自動で配置。指で動かして調整' },
   { icon: 'cube', title: '3Dパース', text: '平面図がそのまま立体に。お客様に見せる' },
   { icon: 'yen', title: '見積もり', text: '面積と長さから自動で計算。見積書を印刷' },
 ];
@@ -26,16 +29,18 @@ export function Home() {
   const [creating, setCreating] = useState(false);
   const [name, setName] = useState('');
   const [customer, setCustomer] = useState('');
+  const [pattern, setPattern] = useState(PATTERNS[0].key);
 
   const create = () => {
     const title = name.trim() || (customer.trim() ? `${customer.trim()}様邸 外構工事` : '新しい案件');
-    const p = createProject(title);
+    const p = createProject(title, pattern);
     if (customer.trim()) {
       updateProject(p.id, (x) => ({ ...x, survey: { ...x.survey, answers: { ...x.survey.answers, customerName: customer.trim() } } }));
     }
     setCreating(false);
     setName('');
     setCustomer('');
+    setPattern(PATTERNS[0].key);
     navigate({ name: 'project', id: p.id, tab: 'survey' });
   };
 
@@ -123,7 +128,7 @@ export function Home() {
             const est = estimateOf(p, settings);
             return (
               <li key={p.id} className="card project-card">
-                <button type="button" className="project-main" onClick={() => navigate({ name: 'project', id: p.id, tab: p.plan ? 'plan' : 'survey' })}>
+                <button type="button" className="project-main" onClick={() => navigate({ name: 'project', id: p.id, tab: hasProposal(p.plan) ? 'plan' : 'survey' })}>
                   <span className="project-name">
                     {p.sample && <span className="tag">サンプル</span>}
                     {p.name}
@@ -141,7 +146,7 @@ export function Home() {
                     </span>
                     <span className="stat">
                       <span className="stat-label">平面図</span>
-                      <span className="stat-value">{p.plan ? `部材 ${p.plan.items.length}点` : '未作成'}</span>
+                      <span className="stat-value">{hasProposal(p.plan) ? `部材 ${p.plan.items.filter((it) => hasKind(it.kind) && !isBaseItem(it)).length}点` : '既存図のみ'}</span>
                     </span>
                     <span className="stat">
                       <span className="stat-label">見積（税込）</span>
@@ -194,6 +199,11 @@ export function Home() {
               onChange={setName}
               placeholder={customer.trim() ? `${customer.trim()}様邸 外構工事` : '〇〇様邸 外構工事'}
             />
+            <div className="field">
+              <span className="field-label">敷地と建物のパターン</span>
+              <p className="field-hint">近いものを選ぶと、建物が入った図から始められます。大きさはあとで合わせます。</p>
+              <PatternPicker current={pattern} onPick={(p) => setPattern(p.key)} />
+            </div>
             <button type="submit" className="btn btn-primary btn-lg">
               現地調査をはじめる
               <Icon name="next" size={18} />

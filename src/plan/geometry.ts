@@ -1,5 +1,5 @@
 import type { Plan, PlanItem } from '../types';
-import { BLOCK_ROW_HEIGHT, catalogOf, hasKind, itemQty, lineLength, unitPrice } from '../lib/catalog';
+import { BLOCK_ROW_HEIGHT, catalogOf, hasKind, itemQty, lineLength, unitPrice, variantOf } from '../lib/catalog';
 import { roundQty } from '../lib/estimate';
 import { r2 } from '../lib/format';
 
@@ -125,15 +125,15 @@ export interface ItemCost {
 /** 部材 1 つの概算（プロパティパネルの表示用） */
 export function itemCost(it: PlanItem, prices: Record<string, number>): ItemCost | null {
   const c = catalogOf(it.kind);
-  if (c.qty === 'none') return null;
+  if (c.qty === 'none' || variantOf(it.kind, it.variant).skip) return null;
   const qty = roundQty(itemQty(it), c.unit);
   const price = unitPrice(prices, it.kind, it.variant);
   const cost: ItemCost = { qty, unit: c.unit, unitPrice: price, amount: Math.round(qty * price) };
-  if (it.kind === 'fence') {
+  if (it.kind === 'fence' || it.kind === 'exFence') {
     const rows = Number(it.props.baseRows ?? 0);
     if (rows > 0) {
       const bq = roundQty(lineLength(it) * rows * BLOCK_ROW_HEIGHT, 'm²');
-      const bp = unitPrice(prices, 'block', 'cb');
+      const bp = it.kind === 'fence' ? unitPrice(prices, 'block', 'cb') : unitPrice(prices, 'exBlock', 'remove');
       cost.base = { qty: bq, unitPrice: bp, amount: Math.round(bq * bp) };
     }
   }

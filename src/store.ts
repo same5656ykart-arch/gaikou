@@ -1,7 +1,9 @@
 import { useSyncExternalStore } from 'react';
 import type { Project, Settings, Tab } from './types';
 import { newEstimateState } from './lib/estimate';
+import { patternOf, planFromPattern } from './lib/existing';
 import { todayISO, uid } from './lib/format';
+import { migrateProject, migrateSettings } from './lib/migrate';
 import { deletePhoto } from './lib/photos';
 import { makeSampleProject } from './lib/sample';
 
@@ -21,21 +23,24 @@ export const DEFAULT_SETTINGS: Settings = {
   overheadRate: 10,
 };
 
+/** 保存データ・バックアップを、いまの版の形にそろえる（足りない項目の補完と、以前の版からの移行） */
+export function normalizeState(data: Partial<AppState>): AppState {
+  const raw: Settings = {
+    ...DEFAULT_SETTINGS,
+    ...(data.settings ?? {}),
+    company: { ...DEFAULT_SETTINGS.company, ...(data.settings?.company ?? {}) },
+  };
+  // 単価は移行前のキーで引くので、案件を先に移行する
+  const projects = (data.projects ?? []).map((p) => migrateProject(p, raw.prices));
+  return { projects, settings: migrateSettings(raw) };
+}
+
 function load(): AppState {
   try {
     const raw = localStorage.getItem(KEY);
     if (raw) {
       const data = JSON.parse(raw) as Partial<AppState>;
-      if (Array.isArray(data.projects)) {
-        return {
-          projects: data.projects,
-          settings: {
-            ...DEFAULT_SETTINGS,
-            ...(data.settings ?? {}),
-            company: { ...DEFAULT_SETTINGS.company, ...(data.settings?.company ?? {}) },
-          },
-        };
-      }
+      if (Array.isArray(data.projects)) return normalizeState(data);
     }
   } catch {
     /* 保存データが読めないときは初期状態から始める */
@@ -98,7 +103,7 @@ export function useProject(id: string): Project | undefined {
   return useAppState((s) => s.projects.find((p) => p.id === id));
 }
 
-export function createProject(name: string): Project {
+export function createProject(name: string, patternKey?: string): Project {
   const now = Date.now();
   const p: Project = {
     id: uid(),
@@ -106,7 +111,8 @@ export function createProject(name: string): Project {
     createdAt: now,
     updatedAt: now,
     survey: { answers: { surveyDate: todayISO() }, photos: [] },
-    plan: null,
+    // 建物入りの既存図を最初から用意しておく
+    plan: planFromPattern(patternOf(patternKey)),
     estimate: newEstimateState(state.settings, state.projects.length + 1),
   };
   setState({ ...state, projects: [p, ...state.projects] });

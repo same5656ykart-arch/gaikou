@@ -3,7 +3,7 @@ import type { Company, Project, Settings } from '../types';
 import { CATALOG, EXTRA_PRICES, WORKS, priceKey } from '../lib/catalog';
 import { todayISO, yen } from '../lib/format';
 import { blobToDataUrl, dataUrlToBlob, downloadBlob, loadPhoto, savePhoto } from '../lib/photos';
-import { DEFAULT_SETTINGS, confirmDialog, getState, goBack, replaceAll, toast, updateSettings, useAppState } from '../store';
+import { confirmDialog, getState, goBack, normalizeState, replaceAll, toast, updateSettings, useAppState } from '../store';
 import { Icon } from '../ui/Icon';
 import { NumField, TextField } from '../ui/fields';
 
@@ -18,7 +18,9 @@ interface PriceRow {
 
 const PRICE_ROWS: PriceRow[] = [
   ...EXTRA_PRICES.map((e) => ({ key: e.key, work: e.work, name: e.name, spec: e.spec, unit: e.unit, base: e.price })),
-  ...CATALOG.filter((c) => c.qty !== 'none').flatMap((c) => c.variants.map((v) => ({ key: priceKey(c.key, v.key), work: c.work, name: c.name, spec: v.name, unit: c.unit, base: v.price }))),
+  ...CATALOG.filter((c) => c.qty !== 'none').flatMap((c) =>
+    c.variants.filter((v) => !v.skip).map((v) => ({ key: priceKey(c.key, v.key), work: c.work, name: c.name, spec: v.name, unit: c.unit, base: v.price })),
+  ),
 ];
 
 interface Backup {
@@ -88,11 +90,10 @@ export function SettingsScreen() {
     try {
       for (const [id, url] of Object.entries(data.photos ?? {})) await savePhoto(id, await dataUrlToBlob(url));
       const st = getState();
-      const ids = new Set(data.projects.map((p) => p.id));
-      replaceAll({
-        projects: [...data.projects, ...st.projects.filter((p) => !ids.has(p.id))],
-        settings: { ...DEFAULT_SETTINGS, ...data.settings, company: { ...DEFAULT_SETTINGS.company, ...(data.settings?.company ?? {}) } },
-      });
+      // 以前の版のバックアップも読めるよう、いまの形にそろえてから取り込む
+      const incoming = normalizeState({ projects: data.projects, settings: data.settings });
+      const ids = new Set(incoming.projects.map((p) => p.id));
+      replaceAll({ projects: [...incoming.projects, ...st.projects.filter((p) => !ids.has(p.id))], settings: incoming.settings });
       toast('バックアップを読み込みました');
     } catch {
       toast('読み込みの途中で失敗しました');
