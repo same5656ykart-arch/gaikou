@@ -56,9 +56,21 @@ React + TypeScript + Vite、3D は three.js です。
 
 ### 公開のしかた
 
-`npm run build` でできる `dist/` フォルダは静的ファイルだけなので、GitHub Pages・Netlify・Vercel・
-社内サーバーなど、どこに置いても動きます（`base: './'` のためサブフォルダ配下でも可）。
-スマホでは「ホーム画面に追加」するとアプリのように開けます。
+GitHub Pages で公開する設定が入っています（`.github/workflows/deploy.yml`）。
+`main` に変更が入るたびに、テスト → ビルドを行い、結果を `gh-pages` ブランチに置きます。
+
+初回だけ、GitHub のリポジトリ画面で次の設定をします。
+
+1. Settings → General → Danger Zone → Change repository visibility で **Public** にする
+   （無料プランの GitHub Pages は公開リポジトリのみ対応）。
+2. Settings → Pages → Build and deployment → Source を **Deploy from a branch** にし、
+   Branch で **gh-pages** と **/ (root)** を選んで Save。
+
+1〜2 分後に `https://<ユーザー名>.github.io/<リポジトリ名>/` で開けるようになります。
+スマホでは「ホーム画面に追加」するとアプリのように使えます。
+
+`npm run build` でできる `dist/` フォルダは静的ファイルだけなので、Netlify・Vercel・社内サーバーなど、
+ほかの場所に置いても動きます（`base: './'` のためサブフォルダ配下でも可）。
 
 ### フォルダ構成
 
