@@ -153,7 +153,7 @@ export function ExistingPanel({ project, plan, stepLabel, commit, onSelect, onFi
         <h3 className="ex-title">
           <span className="mark">2</span>大きさを合わせる
         </h3>
-        <p className="field-hint">数字を入れるか、図の上で建物や敷地の端（四角のつまみ）をドラッグします。道路は図の下側です。</p>
+        <p className="field-hint">数字を入れるか、図の上で動かします。敷地は端の四角いつまみをドラッグ、建物はタップして選んでからドラッグします。道路は図の下側です。</p>
         <div className="row-2">
           <NumField id="ex-site-w" compact label="敷地の幅（間口）" unit="m" step={0.1} min={2} max={80} allowEmpty={false} stepper value={W} onChange={(v) => v !== undefined && commit(resizeSite(plan, v, D), 'site-w')} />
           <NumField id="ex-site-d" compact label="敷地の奥行" unit="m" step={0.1} min={2} max={80} allowEmpty={false} stepper value={D} onChange={(v) => v !== undefined && commit(resizeSite(plan, W, v), 'site-d')} />

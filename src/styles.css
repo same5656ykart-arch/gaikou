@@ -42,6 +42,17 @@ html {
   -webkit-text-size-adjust: 100%;
 }
 
+/*
+ * ページ全体は動かさない。
+ * スマホでは、ドラッグや慣性スクロールがページ全体に伝わると画面ごと動いたり跳ねたりするので、
+ * アプリの枠（.app）を画面に固定し、スクロールは中の枠（各画面・パネル）だけで行う。
+ */
+html,
+body {
+  height: 100%;
+  overscroll-behavior: none;
+}
+
 body {
   margin: 0;
   background: var(--bg);
@@ -51,7 +62,6 @@ body {
   line-height: 1.6;
   font-variant-numeric: tabular-nums;
   -webkit-tap-highlight-color: transparent;
-  overscroll-behavior-y: none;
 }
 
 h1,
@@ -139,14 +149,24 @@ button:disabled {
 
 /* ---------- 画面の骨組み ---------- */
 
-.app,
-.screen {
-  min-height: 100dvh;
-}
-
-.screen {
+.app {
+  position: fixed;
+  inset: 0;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
+}
+
+/* ホーム・設定は、この枠の中でスクロールする（ピンチでの拡大は残す） */
+.screen {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+  touch-action: pan-y pinch-zoom;
 }
 
 .topbar {
@@ -598,6 +618,7 @@ select.input {
 .modal-backdrop {
   position: fixed;
   inset: 0;
+  touch-action: none;
   z-index: 50;
   display: grid;
   /* 中身が広くても、列を画面の幅より広げない */
@@ -670,6 +691,8 @@ select.input {
 
 .sheet-body {
   overflow: auto;
+  touch-action: pan-y;
+  overscroll-behavior: contain;
   padding: 16px 18px calc(20px + env(safe-area-inset-bottom, 0px));
 }
 
@@ -908,10 +931,15 @@ select.input {
 
 /* ---------- 案件画面 ---------- */
 
+/*
+ * 案件の画面は 1 画面に収め、全体はスクロールも拡大もさせない。
+ * touch-action: none を枠にかけ、中でスクロールする枠だけ pan-y / pan-x を許す
+ * （図の上のドラッグが、ページの移動や拡大にならないようにする）。
+ */
 .project {
-  height: 100dvh;
-  min-height: 0;
   overflow: hidden;
+  touch-action: none;
+  -webkit-touch-callout: none;
 }
 
 .project-title {
@@ -1029,6 +1057,8 @@ select.input {
   display: flex;
   gap: 6px;
   overflow-x: auto;
+  touch-action: pan-x;
+  overscroll-behavior: contain;
   padding: 10px var(--gutter-r) 10px var(--gutter-l);
   background: var(--surface);
   border-bottom: 1px solid var(--line);
@@ -1091,6 +1121,8 @@ select.input {
   min-height: 0;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
+  touch-action: pan-y;
+  overscroll-behavior: contain;
 }
 
 .survey-inner {
@@ -1435,6 +1467,9 @@ select.input {
   display: flex;
   gap: 8px;
   overflow-x: auto;
+  /* 横に送れて、縦になぞったときは外側のパネルがスクロールする */
+  touch-action: pan-x pan-y;
+  overscroll-behavior-x: contain;
   padding: 2px 2px 8px;
   scroll-snap-type: x proximity;
 }
@@ -1604,6 +1639,7 @@ select.input {
   touch-action: none;
   user-select: none;
   -webkit-user-select: none;
+  -webkit-touch-callout: none;
   cursor: grab;
 }
 
@@ -1815,10 +1851,21 @@ select.input {
   background: var(--accent-hover);
 }
 
+/* スマホでは図がせまいので、部材を選んでいる間は「部材を追加」と概算を隠して、図を広く使う */
+@media (max-width: 899px) {
+  .plan.has-selection .fab,
+  .plan.has-selection .plan-total {
+    display: none;
+  }
+}
+
 .plan-panel {
   flex: none;
   max-height: 46%;
   overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-y;
+  overscroll-behavior: contain;
   background: var(--surface);
   border-top: 1px solid var(--line);
   padding: 12px var(--gutter-r) 12px var(--gutter-l);
@@ -2189,6 +2236,8 @@ select.input {
   min-height: 0;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
+  touch-action: pan-y;
+  overscroll-behavior: contain;
   display: flex;
   flex-direction: column;
   gap: 18px;
@@ -2480,6 +2529,10 @@ select.input {
   inset: 0;
   z-index: 60;
   overflow: auto;
+  -webkit-overflow-scrolling: touch;
+  /* 書類のプレビューは、拡大して読めるようにしておく */
+  touch-action: pan-x pan-y pinch-zoom;
+  overscroll-behavior: contain;
   background: #55616b;
 }
 
@@ -2871,6 +2924,11 @@ select.input {
 }
 
 @media print {
+  html,
+  body {
+    height: auto;
+  }
+
   body {
     background: #fff;
   }

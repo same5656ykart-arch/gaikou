@@ -34,7 +34,7 @@ interface View {
 }
 
 type Drag =
-  | { mode: 'pan'; pid: number; sx: number; sy: number; view: View; moved: boolean }
+  | { mode: 'pan'; pid: number; sx: number; sy: number; view: View; moved: boolean; tapId?: string }
   | { mode: 'move'; pid: number; sx: number; sy: number; wx: number; wy: number; orig: PlanItem; cands: Cands; moved: boolean }
   | { mode: 'resize'; pid: number; handle: string; ox: number; oy: number; orig: PlanItem; cands: Cands; moved: boolean }
   | { mode: 'end'; pid: number; which: 1 | 2; ox: number; oy: number; orig: PlanItem; cands: Cands; moved: boolean }
@@ -219,7 +219,18 @@ export function PlanEditor({ project, mode, onGo, stepLabel }: EditorProps) {
       zoomAt(Math.exp(e.deltaY * 0.0015), e.clientX, e.clientY);
     };
     el.addEventListener('wheel', onWheel, { passive: false });
-    return () => el.removeEventListener('wheel', onWheel);
+    // スマホ：図の上のドラッグやピンチが、ページ自体のスクロール・拡大にならないようにする。
+    // （CSS の touch-action が効かない古い端末・アプリ内ブラウザ向けの保険）
+    const block = (e: Event) => e.preventDefault();
+    el.addEventListener('touchmove', block, { passive: false });
+    el.addEventListener('gesturestart', block);
+    el.addEventListener('gesturechange', block);
+    return () => {
+      el.removeEventListener('wheel', onWheel);
+      el.removeEventListener('touchmove', block);
+      el.removeEventListener('gesturestart', block);
+      el.removeEventListener('gesturechange', block);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -312,6 +323,12 @@ export function PlanEditor({ project, mode, onGo, stepLabel }: EditorProps) {
     e.stopPropagation();
     capture(e);
     if (startPinchIfNeeded()) return;
+    // 指での操作は、選んでいない部材をいきなり動かさない。
+    // 図を動かそうとして部材がずれるのを防ぐため、タップで選んでからドラッグで動かす。
+    if (e.pointerType === 'touch' && selectedRef.current !== it.id) {
+      drag.current = { mode: 'pan', pid: e.pointerId, sx: e.clientX, sy: e.clientY, view: viewRef.current, moved: false, tapId: it.id };
+      return;
+    }
     setSelectedId(it.id);
     const [wx, wy] = toWorld(e.clientX, e.clientY);
     drag.current = { mode: 'move', pid: e.pointerId, sx: e.clientX, sy: e.clientY, wx, wy, orig: it, cands: snapCandidates(visible(draft.current), it.id), moved: false };
@@ -392,7 +409,8 @@ export function PlanEditor({ project, mode, onGo, stepLabel }: EditorProps) {
     if (d.pid !== e.pointerId) return;
     drag.current = null;
     if (d.mode === 'pan') {
-      if (!d.moved) setSelectedId(null); // 何もないところをタップ → 選択解除
+      // 動かさずに離した＝タップ。部材の上ならその部材を選び、何もないところなら選択を解除
+      if (!d.moved) setSelectedId(d.tapId ?? null);
       return;
     }
     if (d.moved && draft.current !== committed.current) commit(draft.current);
@@ -471,7 +489,7 @@ export function PlanEditor({ project, mode, onGo, stepLabel }: EditorProps) {
   const proposalCount = plan.items.filter((it) => hasKind(it.kind) && !isBaseItem(it)).length;
 
   return (
-    <div className={'plan' + (existing ? ' plan-existing' : '')}>
+    <div className={'plan' + (existing ? ' plan-existing' : '') + (selected ? ' has-selection' : '')}>
       <div className="plan-canvas" ref={wrapRef}>
         <svg
           ref={svgRef}
@@ -598,7 +616,7 @@ export function PlanEditor({ project, mode, onGo, stepLabel }: EditorProps) {
               </>
             ) : (
               <>
-                <p className="panel-hint">部材をタップして選ぶ。ドラッグで移動、角の丸をドラッグで大きさを変えられます。</p>
+                <p className="panel-hint">部材をタップして選ぶ。選んだ部材はドラッグで移動、角の丸で大きさを変えられます。図そのものは、1本指のドラッグで移動、2本指で拡大できます。</p>
                 <div className="panel-idle-actions">
                   <button type="button" className="btn" onClick={() => setSiteSheet(true)}>
                     敷地 {num(plan.site.width)}×{meters(plan.site.depth)}

@@ -87,6 +87,11 @@ export default function View3D({ project, onGo }: Props) {
     renderer.toneMapping = THREE.NeutralToneMapping;
     renderer.domElement.className = 'view3d-canvas';
     mount.appendChild(renderer.domElement);
+    // スマホ：まわす・拡大の操作が、ページ自体のスクロール・拡大にならないようにする
+    const block = (e: Event) => e.preventDefault();
+    renderer.domElement.addEventListener('touchmove', block, { passive: false });
+    renderer.domElement.addEventListener('gesturestart', block);
+    renderer.domElement.addEventListener('gesturechange', block);
 
     const w = Math.max(1, mount.clientWidth);
     const h = Math.max(1, mount.clientHeight);

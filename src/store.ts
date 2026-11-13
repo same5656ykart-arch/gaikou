@@ -78,6 +78,15 @@ function setState(next: AppState) {
 }
 
 if (typeof window !== 'undefined') {
+  // iPhone では、入力欄を閉じたあとにページがずれたまま残ることがある。
+  // ページ自体はスクロールさせない作りなので、入力が終わったら元の位置に戻す。
+  document.addEventListener('focusout', () => {
+    setTimeout(() => {
+      const el = document.activeElement;
+      const typing = el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement;
+      if (!typing && (window.scrollX !== 0 || window.scrollY !== 0)) window.scrollTo(0, 0);
+    }, 80);
+  });
   window.addEventListener('pagehide', flush);
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'hidden') flush();
@@ -190,7 +199,6 @@ export function navigate(r: Route, opts: { replace?: boolean } = {}): void {
     /* 履歴が使えない環境でも画面は切り替える */
   }
   setRoute(r);
-  window.scrollTo(0, 0);
 }
 
 export function goBack(): void {
